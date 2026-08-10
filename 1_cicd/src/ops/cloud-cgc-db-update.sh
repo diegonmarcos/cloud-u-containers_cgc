@@ -248,7 +248,7 @@ propagate_to_host() {
   _ctr=$(jq -r '.containers.app.container_name' "$BJ")
   # Resolve the SSH target data-driven: in CI, build-gha.json maps the alias →
   # user@wg_ip (no ~/.ssh/config needed); locally, fall back to the ssh alias.
-  _gha="$ROOT/2_configs/dist/build-gha.json"
+  _gha="$ROOT/1_configs/dist/build-gha.json"
   _target="$_host"
   if [ -f "$_gha" ]; then
     _wgip=$(jq -r --arg h "$_host" '.vms[$h].wg_ip // empty'  "$_gha" 2>/dev/null)

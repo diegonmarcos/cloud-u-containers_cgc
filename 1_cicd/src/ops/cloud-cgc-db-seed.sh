@@ -25,7 +25,7 @@ VOLUME=$(jq -r '.db_publish.volume // .runtime.octocode.db_volume' "$BJ")
 [ -n "$IMAGE" ] && [ -n "$HOST" ] && [ -n "$VOLUME" ] || { echo "::error::need db_publish.{image,host,volume}"; exit 1; }
 
 # Resolve the SSH target data-driven (CI: user@wg_ip from build-gha.json; local: ssh alias).
-GHA="$ROOT/2_configs/dist/build-gha.json"
+GHA="$ROOT/1_configs/dist/build-gha.json"
 TARGET="$HOST"
 if [ -f "$GHA" ]; then
   WGIP=$(jq -r --arg h "$HOST" '.vms[$h].wg_ip // empty'  "$GHA" 2>/dev/null)

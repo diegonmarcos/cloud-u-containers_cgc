@@ -59,7 +59,7 @@ jobs:
           esac
       - name: WireGuard up
         continue-on-error: true
-        run: bash 1_workflows/src/scripts/cloud-ship-ci-setup-wireguard.sh
+        run: bash 1_configs/src/scripts/cloud-ship-ci-setup-wireguard.sh
       - name: Provision SSH key for propagation
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -73,4 +73,4 @@ jobs:
           # phase → PER-PHASE manifest so each phase change-gates independently and
           # graphrag is not skipped just because semantic already advanced HEAD.
           CGC_MANIFEST_PHASE: ${{ inputs.phase }}
-        run: sh 1_workflows/src/scripts/cloud-cgc-db-update.sh
+        run: sh 1_configs/src/scripts/cloud-cgc-db-update.sh
