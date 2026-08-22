@@ -33,7 +33,7 @@ set +e +u
 set +o pipefail 2>/dev/null || true
 
 echo "── detect_mode (image name → packaging mode) ──"
-[ "$(detect_mode cloud-cgc-mcp-octocode-db)" = "monolith" ] \
+[ "$(detect_mode cloud-cgc-pub-mcp-octocode-db)" = "monolith" ] \
   && ok "unrelated image name -> monolith (unchanged path)" || bad "monolith detection"
 [ "$(detect_mode cgc-db-base)" = "base" ] \
   && ok "cgc-db-base -> base" || bad "base detection"
@@ -164,12 +164,12 @@ unset STUB_PUT_RC
 # monolith mode (refactor-equivalence smoke test — behaviour is unchanged,
 # only moved into a function)
 : > "$CALL_LOG"; STUB_ISPRIVATE=false STUB_CUR_VIS=public
-out=$(visibility_monolith cloud-cgc-mcp-octocode-db 2>&1)
+out=$(visibility_monolith cloud-cgc-pub-mcp-octocode-db 2>&1)
 { ! echo "$out" | grep -q "::error::" && [ ! -s "$CALL_LOG" ]; } \
   && ok "monolith: no private repo_map entries -> no-op" || bad "case H: out=[$out] log=[$(cat "$CALL_LOG")]"
 
 : > "$CALL_LOG"; STUB_ISPRIVATE=true STUB_CUR_VIS=public
-out=$(visibility_monolith cloud-cgc-mcp-octocode-db 2>&1)
+out=$(visibility_monolith cloud-cgc-pub-mcp-octocode-db 2>&1)
 { echo "$out" | grep -q "::error::" && grep -q "visibility=private" "$CALL_LOG"; } \
   && ok "monolith: private repo_map entries -> forced private" || bad "case I: out=[$out] log=[$(cat "$CALL_LOG")]"
 
