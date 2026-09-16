@@ -211,6 +211,144 @@ case "$PARENT_CODE" in
   *) ok "the staging parent defaults off /tmp and /var/tmp" ;;
 esac
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. THE SWAP ITSELF MUST BE ABLE TO FAIL (#352 defect 2).
+#     Everything above gates the STAGED tree, before the swap. None of it can see
+#     a swap that corrupts the volume on its way in, and until 2026-09-16 the swap
+#     literally could not report one: it ran as
+#         sh -c 'rm -rf /dst/*; cp -a /src/. /dst/; chmod 0755 /dst
+#                [ -n "$CGC_DB_OWNER" ] && chown -R "$CGC_DB_OWNER" /dst; :'
+#     with no `set -e` and a trailing `:` forcing the shell's status to 0. A `cp -a`
+#     killed by ENOSPC part-way -- the live risk on a box the script's own
+#     STAGING_PARENT comment measures at 76%->85% from this staging tree alone --
+#     left a half-written volume, returned 0, and the outer `set -eu` never fired.
+#     The run went GREEN and `cgc_octocode_search` threw `lance error: Not found`
+#     against a manifest whose fragments had never been copied. The good copy was
+#     already gone: `rm -rf /dst/*` runs first.
+#
+#     These assertions are structural because the failure is structural -- there is
+#     no host here with a docker socket to drive a real swap against. They search
+#     CODE only (comment lines are skipped by code_line / the block extraction
+#     below starts at a code line), for the same reason section 8 does: the prose
+#     explaining this fix quotes the broken form verbatim.
+SWAP_CODE_LN=$(code_line "$RA_SH" 'CGC_DB_TARGET_VOLUME:/dst')
+if [ -n "$SWAP_CODE_LN" ]; then
+  # From the docker run's -v line to the end of the swap's failure handler.
+  SWAP_BLOCK="$(awk -v n="$SWAP_CODE_LN" 'NR>=n-2 && NR<n+30' "$RA_SH")"
+else
+  SWAP_BLOCK=""
+  bad "cannot locate the volume swap in restore-all.sh -- every check below is blind"
+fi
+
+# 11a. The busybox shell must abort on the first failed command.
+case "$SWAP_BLOCK" in
+  *"sh -ec "*) ok "the swap's busybox shell runs under -e (a failed cp aborts it)" ;;
+  *) bad "the swap's busybox shell has no -e: a cp that dies part-way keeps going and the volume is served half-written" ;;
+esac
+
+# 11b. THE MASK. A trailing `:` (or `; true`) as the last command pins the status
+#      at 0 and makes every check in 11a pointless.
+case "$SWAP_BLOCK" in
+  *"; :'"*|*"; true'"*) bad "the swap still ends in a status-masking ': the busybox shell reports 0 no matter what happened, so the outer set -eu can never see a failed swap" ;;
+  *) ok "the swap does not mask its own exit status" ;;
+esac
+
+# 11c. The chown must be an explicit if. `[ -n "$X" ] && chown` as the LAST command
+#      is status-1-when-empty, which is what the `:` was there to hide -- restore
+#      the `&&` and someone will "fix" it with a `:` again. This is the same trap
+#      the comment at the bottom of restore-all.sh diagnosed on 2026-09-07.
+case "$SWAP_BLOCK" in
+  *'CGC_DB_OWNER" ] && chown'*) bad "the swap's chown is a trailing [ ... ] && chown, whose status is 1 when CGC_DB_OWNER is empty -- the exact thing that got masked with a ':' last time" ;;
+  *) ok "the swap's chown is an explicit if, not a status-leaking &&" ;;
+esac
+
+# 11d. And the failure has to be FATAL to the restore, not logged and walked past.
+case "$SWAP_BLOCK" in
+  *"exit 1"*) ok "a failed swap exits non-zero (the run goes RED instead of green over a torn volume)" ;;
+  *) bad "nothing in the swap block exits non-zero -- a failed swap would still reach 'RESTORE COMPLETE'" ;;
+esac
+
+# 11e. BEHAVIOURAL, not just structural. Everything in 11a-11d matches text; this
+#      EXTRACTS the busybox script the swap actually runs and EXECUTES it, with
+#      /src and /dst redirected at scratch dirs, to prove the two properties that
+#      matter: a copy that cannot complete makes it exit NON-ZERO, and a copy that
+#      completes makes it exit ZERO. The pre-fix fragment returns 0 in both cases
+#      -- that is the whole defect, and a text match alone would not have caught a
+#      "fix" that kept the `:` somewhere else in the pipeline.
+SWAP_SH="$(awk "NR>=$SWAP_CODE_LN" "$RA_SH" \
+  | awk '/sh -ec '"'"'/{f=1; sub(/^.*sh -ec '"'"'/,""); } f{print} f&&/'"'"' \|\| \{$/{exit}' \
+  | sed "s/' || {\$//")"
+
+if [ -z "$SWAP_SH" ]; then
+  bad "could not extract the swap's busybox script -- 11e cannot run (did the sh -ec form change?)"
+else
+  SB="$WORK/swapbeh"; mkdir -p "$SB/src/proj/storage" "$SB/dst"
+  printf 'FRAGMENT' > "$SB/src/proj/storage/a.lance"
+  printf 'FRAGMENT' > "$SB/src/proj/storage/b.lance"
+  printf 'cfg'      > "$SB/src/config.toml"
+  # Same script, /src and /dst pointed at the scratch dirs. CGC_DB_OWNER empty is
+  # the case the masking `:` existed to paper over, so test exactly that.
+  SWAP_RUN="$(printf '%s' "$SWAP_SH" | sed -e "s#/src#$SB/src#g" -e "s#/dst#$SB/dst#g")"
+
+  # (i) happy path must succeed and must report parity.
+  beh_out="$(CGC_DB_OWNER="" sh -ec "$SWAP_RUN" 2>&1)"; beh_rc=$?
+  if [ "$beh_rc" -eq 0 ]; then
+    ok "swap fragment exits 0 on a complete copy (CGC_DB_OWNER empty)"
+  else
+    bad "swap fragment failed a HEALTHY copy (rc=$beh_rc): $beh_out -- this would break every restore"
+  fi
+  case "$beh_out" in
+    *"parity OK"*) ok "swap fragment reports the parity it checked" ;;
+    *) bad "swap fragment produced no parity line: $beh_out" ;;
+  esac
+
+  # (ii) THE DEFECT. Make the destination unwritable so cp cannot complete. The
+  #      pre-fix fragment (`sh -c ... ; :`) exits 0 here -- that is precisely how a
+  #      restore reported success over a half-copied volume and left agents querying
+  #      a manifest whose fragments were never written.
+  rm -rf "$SB/dst"; mkdir -p "$SB/dst"; chmod 0500 "$SB/dst"
+  beh_out2="$(CGC_DB_OWNER="" sh -ec "$SWAP_RUN" 2>&1)"; beh_rc2=$?
+  chmod 0700 "$SB/dst"
+  if [ "$beh_rc2" -ne 0 ]; then
+    ok "swap fragment exits NON-ZERO when the copy cannot complete (rc=$beh_rc2)"
+  else
+    bad "swap fragment returned 0 over a copy that could not be written -- the restore will report success over a torn volume, which is #352 defect 2 exactly"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. THE RESTORE MUST VERIFY WHAT IT ACTUALLY WROTE.
+#     lance_dangling_tables runs on $STAGING only. Proving the staged tree is clean
+#     says nothing about the tree in the volume, and the gap between the two is
+#     precisely the swap. The post-restart reindex tail is NOT a substitute and was
+#     checked: octocode-export.py opens graphrag_nodes/relationships/git_metadata
+#     only, never document_blocks/text_blocks/code_blocks -- the tables that were
+#     actually torn in both reported #352 failures -- and its failure is downgraded
+#     to a ::warning:: anyway.
+case "$SWAP_BLOCK" in
+  *"find /src -type f"*|*'find "$STAGING" -type f'*) ok "the swap compares the staged tree against what landed" ;;
+  *) bad "nothing re-reads the target after the swap: a fragment missing from the VOLUME (as opposed to from staging) is invisible to every check in this file" ;;
+esac
+
+# 12b. Both branches, not just the one this box happens to use. The CI path
+#      (cgc-db-index.yml) passes CGC_DB_TARGET_VOLUME and takes the volume branch;
+#      the dagu/manual path takes the host-dir branch. A check on one only is how
+#      half of a two-branch fix goes unnoticed.
+HOST_SWAP_LN=$(code_line "$RA_SH" 'cp -a "$STAGING"/. "$TARGET"/')
+if [ -n "$HOST_SWAP_LN" ]; then
+  HOST_BLOCK="$(awk -v n="$HOST_SWAP_LN" 'NR>=n && NR<n+20' "$RA_SH")"
+  case "$HOST_BLOCK" in
+    *'find "$TARGET" -type f'*) ok "the host-dir branch also verifies what it wrote" ;;
+    *) bad "the host-dir swap branch writes TARGET and never checks it" ;;
+  esac
+  case "$HOST_BLOCK" in
+    *'CGC_DB_OWNER:-}" ] && chown'*) bad "the host-dir branch still uses a trailing [ ... ] && chown" ;;
+    *) ok "the host-dir branch's chown is an explicit if" ;;
+  esac
+else
+  bad "cannot locate the host-dir swap branch in restore-all.sh"
+fi
+
 echo
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ] || exit 1
