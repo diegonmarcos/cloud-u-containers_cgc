@@ -1,6 +1,7 @@
 # cgc knowledge-graph pipeline: public/private split
 
-Status: phases 1-2 done (2026-10-09). Phase 3 (first green run) waits on repository
+Status: phases 1-2 done (2026-10-09): both repos live, CI and leak scan green, pvt pinned to
+7fdcf5f, cloud-infra `cgc-db-restore.yml` live (dispatch-only). Phase 3 (first green run) waits on repository
 secrets (section 8); phases 4-5 follow the order in section 7.
 
 Spec for the indexer itself (chunk windows, manifests, GraphRAG on top of semantic):
@@ -150,14 +151,35 @@ Progress carries over unchanged: same image names, same tags, same in-image stat
    c. set `CGC_SCHEDULE_ENABLED=true` in both new repos;
    d. verify both MCPs: pub counts ≥ baseline above, pvt counts include cloud-data and
       cloud-data-my-ai-memory, both `kg_store_*` refreshed by their own restore.
-5. Remove the moved files from cloud-infra (scripts, testers, spec) and retarget the
-   consumers: `unjam-ship.yml` `WG_WORKFLOWS` (cgc-db.yml → cgc-db-restore.yml),
-   `test_ship_burst_no_dropped_deploy.sh`, `test_unjam_covers_wg_group.sh`,
-   `test_wg_group_lock_bounded.sh`, `wg_group_jobs.py` (restore-all concurrency now in
-   cgc-db-restore.yml), `derive-code-signatures.test.ts` (`CGC_DB_UPDATE_SH` → this
-   repo's copy), `9_others/test-registry.json`. `ship-cgc-db-seed.yml` +
-   `cloud-cgc-db-seed.sh` (one run ever; update.sh auto-seeds a missing base) are
-   proposed for retirement rather than a move.
+5. Remove the moved files from cloud-infra. cloud-infra is main-only (its
+   reference-transaction hook refuses new branches), so this is one commit on main,
+   made in the same window as 4b, AFTER #888's run 37929244331 has finished (any push
+   touching `unjam-ship.yml` triggers Unjam Ship, which cancels in-progress lock holders
+   older than 25 min: it did so to 37843203892 on 2026-10-09):
+   * delete `1_cicd/{src/cicd,dist}/` + `.github/workflows/` copies of `cgc-db.yml`,
+     `cgc-db-index.yml`, `cgc-db-propagate.yml`; `ship-cgc-db-seed.yml` and
+     `cloud-cgc-db-seed.sh` are proposed for retirement (one run ever; update.sh
+     auto-seeds a missing base), owner to confirm;
+   * delete `1_cicd/{src/ops,dist/scripts}/cloud-cgc-db-{update,chunk,package,pull,restore-all,restore,seed}.sh`
+     and `cloud-cgc-verify-surfaces.sh` (this repo is the source);
+   * delete the moved testers in `9_others/test/` and `9_others/dist/test/`
+     (every `cgc-db-*.test.sh` listed in this repo) and their `9_others/test-registry.json`
+     entries; drop lint-pipeline's hand-written steps for
+     `cgc-db-lance-integrity.test.sh` and `cgc-db-noindex-private.test.sh`
+     (`1_cicd/src/cicd/lint-pipeline.yml` and its copies);
+   * retarget, do not delete: `cgc-db-ssh-retry.test.sh` and `cgc-db-poll-liveness.test.sh`
+     test the restore STEP, which now lives in `cgc-db-restore.yml` (change `YML=`);
+     `test_ship_burst_no_dropped_deploy.sh` reads `cgc-db-index.yml`'s
+     `restore-all.concurrency` (line ~246) → `cgc-db-restore.yml`;
+     `unjam-ship.yml` `WG_WORKFLOWS` drops `cgc-db.yml` and `cgc-db-propagate.yml`
+     (and `ship-cgc-db-seed.yml` if retired) and keeps `cgc-db-restore.yml`;
+     `1_cloud-configs/src/derive/derive-code-signatures.test.ts` defaults
+     `CGC_DB_UPDATE_SH` to cloud-infra's update.sh: point it at a checkout of this repo;
+   * comment-only mentions (`wg_group_jobs.py`, `test_wg_group_lock_bounded.sh`,
+     `health_mail_full.yml`, `startup-gpu-embed.sh`, `ship-terraform.yml`,
+     `dispatch-policy.json`, `derive-repo-map.ts`) can follow later;
+   * delete `a0_docs/eng-specs/cgc-incremental-chunked.md` there (moved here).
+6. Delete the logs of 37843203892 and 37929244331 once both are completed (section 6.1).
 
 ## 6. Public-safety audit (2026-10-09)
 
