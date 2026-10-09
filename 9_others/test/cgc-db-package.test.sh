@@ -193,9 +193,17 @@ unset STUB_DELETE_RC
 
 echo "── gate_repo_push (PRE-push gate: never create a public pkg from a private repo) ──"
 : > "$CALL_LOG"; STUB_ISPRIVATE=false STUB_CUR_VIS=absent
-out=$(gate_repo_push cgc-db-front front 2>&1); rc=$?
-{ [ "$rc" -eq 0 ] && [ -z "$out" ] && [ ! -s "$CALL_LOG" ]; } \
-  && ok "gate: public repo -> push allowed, package not even queried" || bad "case G: rc=$rc out=[$out]"
+# First publish of a PUBLIC repo's package: allowed, and routed through a GITHUB_TOKEN
+# login (a PAT push would create the package PRIVATE). docker is stubbed so the case is
+# deterministic with no registry, and GITHUB_TOKEN is a dummy.
+docker() { [ "$1" = login ] && { cat >/dev/null; return 0; }; return 0; }
+out=$(GITHUB_TOKEN=dummy gate_repo_push cgc-db-front front 2>&1); rc=$?
+unset -f docker
+{ [ "$rc" -eq 0 ] && echo "$out" | grep -q "GITHUB_TOKEN-authenticated"; } \
+  && ok "gate: public repo + no pkg -> push allowed, born public via a GITHUB_TOKEN login" || bad "case G: rc=$rc out=[$out]"
+out=$(GITHUB_TOKEN= gate_repo_push cgc-db-front front 2>&1); rc=$?
+{ [ "$rc" -ne 0 ] && echo "$out" | grep -q "needs GITHUB_TOKEN"; } \
+  && ok "gate: public repo + no pkg + no GITHUB_TOKEN -> refused (would be born private)" || bad "case G2: rc=$rc out=[$out]"
 
 : > "$CALL_LOG"; STUB_ISPRIVATE=true STUB_CUR_VIS=private
 out=$(gate_repo_push cgc-db-cloud-infra cloud-infra 2>&1); rc=$?
