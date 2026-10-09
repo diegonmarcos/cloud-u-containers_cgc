@@ -12,7 +12,7 @@ for t in "$ROOT"/9_others/test/*.test.sh; do
   if bash "$t" > "/tmp/run-all.$$.log" 2>&1; then
     echo "PASS $n"
   else
-    echo "FAIL $n"; sed 's/^/    /' "/tmp/run-all.$$.log" | grep -iE 'fail|error' | head -20
+    echo "FAIL $n"; tail -25 "/tmp/run-all.$$.log" | sed 's/^/    /'
     failed="$failed $n"
   fi
 done

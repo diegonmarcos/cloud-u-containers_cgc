@@ -22,4 +22,8 @@ jobs:
       - name: Syntax (sh -n) of every shipped script
         run: for f in 1_cicd/src/ops/*.sh; do sh -n "$f" || exit 1; done
       - name: Run every tester
+        env:
+          # cgc-db-package.test.sh drives the first-publish path, which requires a
+          # GITHUB_TOKEN in env (the job's read-only token; nothing is pushed).
+          GITHUB_TOKEN: ${{ github.token }}
         run: sh 9_others/test/run-all.sh
