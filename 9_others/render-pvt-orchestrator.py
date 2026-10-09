@@ -27,12 +27,12 @@ def render(src: str, sha: str) -> str:
         ("'cgc-db pub · ", "'cgc-db pvt · ", 2),
         ("subset of the PUBLIC index repos", "subset of the PRIVATE index repos", 1),
         ("restore the pub surface afterwards", "restore the pvt surface afterwards", 1),
-        ("uses: ./.github/workflows/cgc-db-index.yml", f"uses: {USES}@{sha}", 2),
-        ("      surface: pub\n", f"      surface: pvt\n      cgc_ref: {sha}\n", 2),
+        ("uses: ./.github/workflows/cgc-db-index.yml", f"uses: {USES}@{sha}", 3),
+        ("      surface: pub\n", f"      surface: pvt\n      cgc_ref: {sha}\n", 3),
         ("      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}\n",
          "      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}\n"
          "      CLOUD_DATA_DEPLOY_KEY: ${{ secrets.CLOUD_DATA_DEPLOY_KEY }}\n"
-         "      CLOUD_MY_AI_MEMORY_DEPLOY_KEY: ${{ secrets.CLOUD_MY_AI_MEMORY_DEPLOY_KEY }}\n", 2),
+         "      CLOUD_MY_AI_MEMORY_DEPLOY_KEY: ${{ secrets.CLOUD_MY_AI_MEMORY_DEPLOY_KEY }}\n", 3),
         ("cgc-db-restore (pub)", "cgc-db-restore (pvt)", 1),
         ("Dispatch the pub-surface restore", "Dispatch the pvt-surface restore", 1),
         ('-f surfaces=pub -f cgc_ref="${{ github.sha }}"', f'-f surfaces=pvt -f cgc_ref="{sha}"', 1),

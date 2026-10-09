@@ -21,6 +21,9 @@
 # │                                                              │
 # │  phase → USE_LLM (semantic=false, graphrag=true) and         │
 # │  CGC_MANIFEST_PHASE (per-phase manifest + chunk state).      │
+# │  phase=both: each repo's job runs semantic, then graphrag in │
+# │  the SAME job, so a repo's graphrag never waits for the      │
+# │  slowest repo's semantic (#888).                             │
 # └──────────────────────────────────────────────────────────────┘
 
 name: "cgc-db-index (reusable octocode index phase)"
@@ -29,7 +32,7 @@ on:
   workflow_call:
     inputs:
       phase:
-        description: "Index phase: semantic (structural, no LLM) or graphrag (LLM relationship enrichment)."
+        description: "Index phase: semantic (structural, no LLM), graphrag (LLM relationship enrichment), or both — each repo's matrix job runs semantic and then, in the same job, graphrag (#888)."
         required: true
         type: string
       surface:
@@ -114,7 +117,7 @@ jobs:
           CALLER: ${{ github.repository }}
         run: |
           set -eu
-          case "${{ inputs.phase }}" in semantic|graphrag) : ;; *) echo "::error::unknown phase '${{ inputs.phase }}'"; exit 1 ;; esac
+          case "${{ inputs.phase }}" in semantic|graphrag|both) : ;; *) echo "::error::unknown phase '${{ inputs.phase }}' (expected semantic|graphrag|both)"; exit 1 ;; esac
           PRIV=$(gh api "repos/$CALLER" -q .private 2>/dev/null || echo unknown)
           echo "[cgc-db] caller $CALLER private=$PRIV surface=$CGC_SURFACE"
           case "$CGC_SURFACE" in
@@ -166,11 +169,12 @@ jobs:
     name: "cgc-db · ${{ inputs.phase }} · ${{ matrix.repo }}"
     needs: repos
     runs-on: ubuntu-latest
-    # Job ceiling 330 > step 315 > script budget 240 (cgc-db-index-budget.test.sh pins
-    # budget + 70 <= step, cgc-db-index-step-timeout.test.sh pins step < job): a STEP timeout
-    # concludes FAILURE, which the orchestrator's graphrag gate accepts; a JOB timeout
-    # concludes CANCELLED and would skip graphrag for every repo.
-    timeout-minutes: 330
+    # Job ceiling 350 > every index step's bound (cgc-db-index-budget.test.sh pins
+    # budget + 30 <= step and the graphrag deadline, cgc-db-index-step-timeout.test.sh pins
+    # step < job): a STEP timeout concludes FAILURE, which the graphrag gates accept; a JOB
+    # timeout concludes CANCELLED and would skip graphrag. 350, was 330: phase=both runs
+    # graphrag in this same job after semantic (#888). Hosted runners cap a job at 360.
+    timeout-minutes: 350
     permissions:
       contents: read
       packages: write
@@ -180,6 +184,11 @@ jobs:
       matrix:
         repo: ${{ fromJson(needs.repos.outputs.repos) }}
     steps:
+      # JOB CLOCK. Both index steps count their budget from here (update.sh reads
+      # CGC_START_TS), so semantic and graphrag share ONE job-wide budget and the graphrag
+      # step's deadline can be computed against the job timeout.
+      - name: Job clock
+        run: echo "CGC_START_TS=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           repository: diegonmarcos/cloud-u-containers_cgc
@@ -194,19 +203,24 @@ jobs:
           mkdir -p "$RUNNER_TEMP/octocode-home/octocode"
           echo "OCTOCODE_HOME=$RUNNER_TEMP/octocode-home/octocode" >> "$GITHUB_ENV"
       - name: "cgc-db incremental update — ${{ matrix.repo }} only (checkpoint push, no propagate)"
+        if: ${{ inputs.phase != 'graphrag' }}
         timeout-minutes: 315
         env:
-          USE_LLM: ${{ inputs.phase == 'graphrag' && 'true' || 'false' }}
+          # phase=both runs THIS step as semantic; graphrag follows in the next step.
+          USE_LLM: "false"
           # Direct OpenRouter, not the mesh-only relay build.json declares: environment is
           # authoritative over build.json, and this keeps the matrix off the mesh entirely.
           OPENROUTER_API_URL: https://openrouter.ai/api/v1/chat/completions
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LLM_HEALTH_URL: https://openrouter.ai/api/v1/models
-          CGC_MANIFEST_PHASE: ${{ inputs.phase }}
+          CGC_MANIFEST_PHASE: semantic
           CGC_INDEX_REPOS: ${{ matrix.repo }}
           CGC_PACKAGE_MODE: per-repo
           CGC_SKIP_PROPAGATE: "1"
-          CGC_BUDGET_MIN: "240"
+          # 285, was 240 (#888): the 75m reserve covered a "restore" and a "publish" that were
+          # both the quadratic lance integrity scan (57m per call on cloud-u-android, now ~1s).
+          # The real pull and package+push of a 1G home take ~1m each; 30m stays reserved.
+          CGC_BUDGET_MIN: "285"
           # Deploy keys reach only the private caller (a public caller has none to pass).
           # update.sh's ensure_repos reads CGC_DEPLOY_KEY_<local_dir folded to _>.
           CGC_DEPLOY_KEY_cloud_data: ${{ secrets.CLOUD_DATA_DEPLOY_KEY }}
@@ -215,3 +229,44 @@ jobs:
           # caller: private-repo output is redacted by update.sh regardless.
           CGC_LOG_REDACT: ${{ inputs.surface == 'pvt' && 'off' || '' }}
         run: sh 1_cicd/src/ops/cloud-cgc-db-update.sh
+      # ── graphrag, in the SAME job as this repo's semantic step (#888) ──
+      # Per-phase matrices made every repo's graphrag wait for the slowest repo's semantic
+      # job (cloud-infra run 37929244331: cloud-u-containers' semantic ended 15:31, its
+      # graphrag could not start before 20:22). Here it starts when its OWN semantic ends.
+      # !cancelled() keeps the old gate's guarantee: a FAILED semantic step (a slow repo's
+      # step timeout included) still lets graphrag run.
+      - name: "Fresh octocode home for graphrag — ${{ matrix.repo }}"
+        if: ${{ !cancelled() && inputs.phase == 'both' }}
+        # graphrag pulls what semantic just published, as the separate graphrag job did.
+        run: |
+          rm -rf "$RUNNER_TEMP/octocode-home"
+          mkdir -p "$RUNNER_TEMP/octocode-home/octocode"
+      - name: "cgc-db graphrag update — ${{ matrix.repo }} only (checkpoint push, no propagate)"
+        if: ${{ !cancelled() && (inputs.phase == 'graphrag' || inputs.phase == 'both') }}
+        # Static backstop below the 350-min job. The real bound is the deadline in `run`,
+        # counted from the job clock, since this step starts whenever semantic ended.
+        timeout-minutes: 340
+        env:
+          USE_LLM: "true"
+          OPENROUTER_API_URL: https://openrouter.ai/api/v1/chat/completions
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_HEALTH_URL: https://openrouter.ai/api/v1/models
+          CGC_MANIFEST_PHASE: graphrag
+          CGC_INDEX_REPOS: ${{ matrix.repo }}
+          CGC_PACKAGE_MODE: per-repo
+          CGC_SKIP_PROPAGATE: "1"
+          # Job-wide budget from the job clock: 285 alone, 300 after semantic (phase=both),
+          # so a repo whose semantic step used its budget (cloud-u-android until it
+          # converges) is deferred below the 20-min floor rather than squeezed; graphrag only
+          # works on files semantic has embedded.
+          CGC_BUDGET_MIN: ${{ inputs.phase == 'both' && '300' || '285' }}
+          # Hard deadline, minutes after the job clock: budget + 30, below the 350-min job.
+          CGC_STEP_DEADLINE_MIN: ${{ inputs.phase == 'both' && '330' || '315' }}
+          CGC_DEPLOY_KEY_cloud_data: ${{ secrets.CLOUD_DATA_DEPLOY_KEY }}
+          CGC_DEPLOY_KEY_cloud_my_ai_memory: ${{ secrets.CLOUD_MY_AI_MEMORY_DEPLOY_KEY }}
+          CGC_LOG_REDACT: ${{ inputs.surface == 'pvt' && 'off' || '' }}
+        run: |
+          left=$(( CGC_START_TS + CGC_STEP_DEADLINE_MIN * 60 - $(date +%s) ))
+          [ "$left" -gt 60 ] || left=60
+          echo "[cgc-db] graphrag step deadline: ${left}s from now (${CGC_STEP_DEADLINE_MIN}m after the job clock)"
+          timeout --kill-after=120 "$left" sh 1_cicd/src/ops/cloud-cgc-db-update.sh

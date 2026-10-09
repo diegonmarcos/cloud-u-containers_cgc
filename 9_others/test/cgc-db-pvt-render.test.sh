@@ -11,7 +11,7 @@ python3 - "$T/pvt.yml" "$SHA" <<'PY'
 import sys, yaml
 y = yaml.safe_load(open(sys.argv[1])); sha = sys.argv[2]; bad = []
 j = y["jobs"]
-for ph in ("semantic", "graphrag"):
+for ph in ("per-repo", "semantic", "graphrag"):
     w = j[ph]["with"]; s = j[ph]["secrets"]
     if w.get("surface") != "pvt": bad.append(f"{ph}: surface {w.get('surface')}")
     if w.get("cgc_ref") != sha: bad.append(f"{ph}: cgc_ref {w.get('cgc_ref')}")

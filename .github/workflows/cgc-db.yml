@@ -6,6 +6,7 @@
 # │  user-ai_cloud-cgc-pub-mcp/build.json), then asks cloud-infra│
 # │  to restore the PUB surface (octocode_db volume +            │
 # │  kg_store_pub) on oci-apps.                                  │
+# │  (per repo: each repo's job runs both phases, #888)          │
 # │                                                              │
 # │  The PVT surface has its own orchestrator in the private     │
 # │  repo diegonmarcos/cloud-u-containers_cgc-pvt, which calls   │
@@ -131,11 +132,33 @@ jobs:
           echo "::error::cancel of run $ME did not take effect within 300s"
           exit 1
 
+  # Both phases, PER REPO (#888): schedule and phase=both. Each repo's matrix job in
+  # cgc-db-index.yml runs its semantic step and then, in the same job, its graphrag step,
+  # so a repo's graphrag starts the moment its OWN semantic ends instead of waiting for
+  # the slowest repo's (cloud-infra run 37929244331: cloud-u-containers waited 5h for
+  # cloud-u-android). The graphrag step runs on !cancelled(), so a failed or timed-out
+  # semantic step still lets it run, as the phase-wide gate below does.
+  per-repo:
+    name: "phase · semantic → graphrag (per repo)"
+    # coalesce is SKIPPED on dispatch; !cancelled() keeps a skipped need from skipping this.
+    needs: [guard, coalesce]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both') }}
+    uses: ./.github/workflows/cgc-db-index.yml
+    with:
+      phase: both
+      surface: pub
+      repos: ${{ github.event.inputs.repos || '' }}
+      force: ${{ github.event.inputs.force || 'false' }}
+    secrets:
+      CGC_GHCR_PAT: ${{ secrets.CGC_GHCR_PAT }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+  # Single-phase dispatches only (schedule and phase=both go through per-repo above).
   semantic:
     name: "phase · semantic"
     # coalesce is SKIPPED on dispatch; !cancelled() keeps a skipped need from skipping this.
     needs: [guard, coalesce]
-    if: ${{ !cancelled() && needs.guard.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both' || inputs.phase == 'semantic') }}
+    if: ${{ !cancelled() && needs.guard.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.phase == 'semantic' }}
     uses: ./.github/workflows/cgc-db-index.yml
     with:
       phase: semantic
@@ -157,7 +180,7 @@ jobs:
       ${{
         !cancelled()
         && needs.guard.result == 'success'
-        && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both' || inputs.phase == 'graphrag')
+        && github.event_name == 'workflow_dispatch' && inputs.phase == 'graphrag'
         && (needs.semantic.result == 'success' || needs.semantic.result == 'skipped' || needs.semantic.result == 'failure' || needs.semantic.result == 'cancelled')
       }}
     uses: ./.github/workflows/cgc-db-index.yml
@@ -178,13 +201,13 @@ jobs:
   # cloud-infra only, Actions: read and write).
   restore:
     name: "restore · dispatch cloud-infra cgc-db-restore (pub)"
-    needs: [guard, semantic, graphrag]
+    needs: [guard, per-repo, semantic, graphrag]
     if: >-
       ${{
         !cancelled()
         && needs.guard.result == 'success'
         && github.event.inputs.restore != 'false'
-        && (needs.semantic.result != 'skipped' || needs.graphrag.result != 'skipped')
+        && (needs.per-repo.result != 'skipped' || needs.semantic.result != 'skipped' || needs.graphrag.result != 'skipped')
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
