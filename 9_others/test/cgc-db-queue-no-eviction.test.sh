@@ -14,8 +14,8 @@
 #      the workflow and run against a stubbed `gh`: a superseded scheduled run
 #      must cancel ITSELF and must never exit 0 — the guard for "a run that did
 #      no work reads as green".
-# Both the source and the deployed .github/ copy are checked: the deployed one is
-# what GitHub actually runs.
+# Checks .github/workflows/cgc-db.yml, the file GitHub runs (this repo has no
+# src -> dist generation step).
 set -eu
 REPO_ROOT="$(_d="$(cd "$(dirname "$0")" && pwd)"; while [ "$_d" != "/" ] && [ ! -e "$_d/.git" ]; do _d="$(dirname "$_d")"; done; printf '%s' "$_d")"
 pass=0; fail=0
@@ -29,7 +29,7 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 runs() { printf '{"workflow_runs":[%s]}' "$1"; }
 R() { printf '{"id":%s,"event":"%s","status":"%s"}' "$1" "$2" "$3"; }
 
-for f in 1_cicd/src/cicd/cgc-db.yml .github/workflows/cgc-db.yml; do
+for f in .github/workflows/cgc-db.yml; do
   Y="$REPO_ROOT/$f"
   [ -f "$Y" ] || { echo "  FAIL $f missing"; fail=$((fail+1)); continue; }
   echo "── $f"
@@ -44,7 +44,7 @@ step = (co.get("steps") or [{}])[0]
 w = lambda n, v: open(f"{t}/{n}", "w").write("" if v is None else str(v))
 w("group", c.get("group")); w("queue", c.get("queue")); w("cip", c.get("cancel-in-progress"))
 w("co_if", co.get("if")); w("filter", (step.get("env") or {}).get("SUPERSEDED_BY"))
-w("run", step.get("run")); w("sem_needs", j.get("semantic", {}).get("needs"))
+w("run", step.get("run")); _n = j.get("semantic", {}).get("needs"); w("sem_needs", "coalesce" if (_n == "coalesce" or (isinstance(_n, list) and "coalesce" in _n)) else _n)
 w("sem_if", j.get("semantic", {}).get("if")); w("gr_if", j.get("graphrag", {}).get("if"))
 # PyYAML reads the `on:` key as boolean True.
 ins = ((y.get(True) or y.get("on") or {}).get("workflow_dispatch") or {}).get("inputs") or {}

@@ -1,0 +1,25 @@
+# Testers on every push and pull request. No secrets, no mesh, no GHCR writes:
+# they execute the scripts' functions and the workflows' own snippets against fixtures.
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  testers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: diegonmarcos/cloud-u-containers
+          path: a_solutions
+      - name: Tools
+        run: python3 -c 'import yaml' && jq --version && shellcheck --version | head -2
+      - name: Syntax (sh -n) of every shipped script
+        run: for f in 1_cicd/src/ops/*.sh; do sh -n "$f" || exit 1; done
+      - name: Run every tester
+        run: sh 9_others/test/run-all.sh

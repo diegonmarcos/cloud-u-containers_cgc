@@ -146,7 +146,11 @@ fi
 # lives only in src/ never reaches oci-apps.
 echo "== 1_cicd/dist/scripts/cloud-cgc-db-restore-all.sh (the copy that ships) =="
 DIST="$REPO_ROOT/1_cicd/dist/scripts/cloud-cgc-db-restore-all.sh"
-if [ ! -f "$DIST" ]; then
+if [ ! -d "$REPO_ROOT/1_cicd/dist" ]; then
+  # cloud-u-containers_cgc has no src -> dist step: cloud-infra's cgc-db-restore.yml fetches
+  # 1_cicd/src/ops/cloud-cgc-db-restore-all.sh at the pinned cgc_ref, so src IS the copy that ships.
+  ok "no dist step in this repo: src is the copy that ships"
+elif [ ! -f "$DIST" ]; then
   bad "dist copy missing: $DIST"
 else
   REC2="$(drive "$DIST" "$DEPLOY/compose" cloud-cgc-pub-mcp)"

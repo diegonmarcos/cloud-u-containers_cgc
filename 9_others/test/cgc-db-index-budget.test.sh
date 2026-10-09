@@ -6,7 +6,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UPD="$ROOT/1_cicd/src/ops/cloud-cgc-db-update.sh"
-for f in "$ROOT/1_cicd/src/cicd/cgc-db-index.yml" "$ROOT/.github/workflows/cgc-db-index.yml"; do
+for f in "$ROOT/.github/workflows/cgc-db-index.yml"; do
   step=$(awk '/^  index:/{i=1} i&&/- name: "cgc-db incremental update/{s=1} s&&/^        timeout-minutes:/{print $2; exit}' "$f")
   budget=$(awk '/^  index:/{i=1} i&&/^          CGC_BUDGET_MIN:/{gsub(/"/,"",$2); print $2; exit}' "$f")
   [ -n "$step" ] && [ -n "$budget" ] || { echo "FAIL $f: step=$step budget=$budget (missing)"; exit 1; }

@@ -45,6 +45,21 @@ ROOT="${CLOUD_ROOT:-$(cd "$HERE/../../.." && pwd)}"
 BJ="${CGC_BUILD_JSON:-$ROOT/a_solutions/user-ai_cloud-cgc-pub-mcp/build.json}"
 [ -f "$BJ" ] || { echo "::error::cloud-cgc-pub-mcp build.json not found at $BJ"; exit 1; }
 
+# Private-repo test, used by the log redaction (octo_log_report below) and by the
+# surface split (CGC_SURFACE). Defined this early because ensure_repos runs long before
+# the index loop. See the PUBLIC-LOG REDACTION note at octo_log_redact.
+cgc_repo_is_private() { # $1 = local repo name -> rc 0 = treat as private (redact)
+  [ "${CGC_LOG_REDACT:-}" = "1" ] && return 0
+  # off: set ONLY by the private caller (cloud-u-containers_cgc-pvt), whose Actions logs
+  # are private, after cgc-db-index.yml has verified through the API that the calling
+  # repository is private. Full logs there are what makes a failed private index debuggable.
+  [ "${CGC_LOG_REDACT:-}" = "off" ] && return 1
+  [ -n "${1:-}" ] || return 0
+  _crp_rc=0
+  jq -e --arg r "$1" '(.runtime.octocode.private_repos // []) | index($r) != null' "$BJ" >/dev/null 2>&1 || _crp_rc=$?
+  case "$_crp_rc" in 0) return 0 ;; 1) return 1 ;; *) return 0 ;; esac
+}
+
 IMAGE=$(jq -r   '.db_publish.image'                  "$BJ")
 TAG=$(jq -r     '.db_publish.tag // "latest"'        "$BJ")
 OCTO_HOME="${OCTOCODE_HOME:-$HOME/.local/share/octocode}"
@@ -140,6 +155,40 @@ for _r in $(jq -r '(.runtime.octocode.repo_map // {}) | keys[]?' "$BJ"); do
     fi
   done
 done
+# SURFACE SPLIT. The pipeline runs from two repositories:
+#   CGC_SURFACE=pub  diegonmarcos/cloud-u-containers_cgc (PUBLIC; its Actions logs are
+#                    public). Private repos are outside its universe entirely: dropped
+#                    from the default list, never cloned, and refused when named.
+#   CGC_SURFACE=pvt  diegonmarcos/cloud-u-containers_cgc-pvt (PRIVATE). Any index repo.
+#   unset            the legacy single pipeline in cloud-infra; behaviour unchanged.
+# cgc-db-index.yml sets it from its `surface` input and refuses surface=pvt unless the
+# calling repository is private.
+CGC_SURFACE="${CGC_SURFACE:-}"
+cgc_apply_surface() { # narrows $REPOS for the surface; sets PRIVATE_LIST on pub
+  case "$CGC_SURFACE" in
+    ""|pvt) : ;;
+    pub)
+      PRIVATE_LIST=$(jq -r '(.runtime.octocode.private_repos // [])[]' "$BJ") \
+        || { echo "::error::[cgc-db] CGC_SURFACE=pub but .runtime.octocode.private_repos is unreadable — cannot prove the run is public-only; refusing"; exit 1; }
+      _kept=""
+      for _r in $REPOS; do
+        if printf '%s\n' "$PRIVATE_LIST" | grep -qxF "$_r"; then
+          if [ -n "${CGC_INDEX_REPOS:-}" ]; then
+            echo "::error::[cgc-db] CGC_SURFACE=pub refuses private repo '$_r' (listed in .runtime.octocode.private_repos): the public pipeline's logs and packages are public"
+            exit 1
+          fi
+          continue
+        fi
+        _kept="$_kept $_r"
+      done
+      REPOS="${_kept# }"
+      [ -n "$REPOS" ] || { echo "::error::[cgc-db] CGC_SURFACE=pub left no repo to index"; exit 1; }
+      echo "[cgc-db] surface=pub — public repos only: $REPOS"
+      ;;
+    *) echo "::error::[cgc-db] unknown CGC_SURFACE '$CGC_SURFACE' (expected pub|pvt)"; exit 1 ;;
+  esac
+}
+cgc_apply_surface
 LLM=$(jq -r     '.runtime.octocode.update.llm_model' "$BJ")
 # USE_LLM selects the GraphRAG LLM phase. Two-phase orchestration (cgc-db.yml →
 # cgc-db-index.yml) drives this via the environment: the `semantic` phase exports
@@ -407,6 +456,11 @@ ensure_repos() {
   rm -f "$_clonefail"
   jq -r '.runtime.octocode.repo_map | to_entries[] | "\(.key) \(.value)"' "$BJ" | while read -r lname remote; do
     [ -n "$lname" ] || continue
+    # The public pipeline never fetches a private repo, not even unindexed: it holds no
+    # deploy key for one and its logs are public.
+    if [ "$CGC_SURFACE" = "pub" ] && printf '%s\n' "$PRIVATE_LIST" | grep -qxF "$lname"; then
+      continue
+    fi
     d="$REPOS_ROOT/$lname"
     # PRIVATE repos need a deploy key. $TOKEN here is the job's GITHUB_TOKEN, which is scoped
     # to THIS repo only — it can never clone a different private repo, so `clone cloud-data`
@@ -1465,13 +1519,6 @@ octo_log_digest() { # $1 = octocode log file, $2 = max lines to print
 # count-shaped summary lines survive, warnings keep their class but lose their detail, and
 # the rest is withheld with a count. Fail-safe: an unreadable build.json or a jq error
 # counts as PRIVATE. CGC_LOG_REDACT=1 forces redaction for every repo.
-cgc_repo_is_private() { # $1 = local repo name -> rc 0 = treat as private (redact)
-  [ "${CGC_LOG_REDACT:-0}" = "1" ] && return 0
-  [ -n "${1:-}" ] || return 0
-  _crp_rc=0
-  jq -e --arg r "$1" '(.runtime.octocode.private_repos // []) | index($r) != null' "$BJ" >/dev/null 2>&1 || _crp_rc=$?
-  case "$_crp_rc" in 0) return 0 ;; 1) return 1 ;; *) return 0 ;; esac
-}
 
 octo_log_redact() { # stdin = octocode log lines -> stdout = path-free, content-free summary
   awk '

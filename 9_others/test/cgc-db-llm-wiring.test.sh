@@ -9,7 +9,7 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SCRIPT="$ROOT/1_cicd/src/ops/cloud-cgc-db-update.sh"
-BJ="$ROOT/1_cloud-configs/dist/build-cloud-cgc-pub-mcp.json"
+BJ="${CGC_BUILD_JSON:-$ROOT/a_solutions/user-ai_cloud-cgc-pub-mcp/build.json}"
 pass=0; fail=0
 ck() { if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "  ok   $1"; \
        else fail=$((fail+1)); echo "  FAIL $1 (want '$3', got '$2')"; fi; }
@@ -69,7 +69,7 @@ ck "graphrag preflights the LLM endpoint" \
 #    slot and let graphrag fan out 8-wide. An earlier version of this test
 #    asserted the OPPOSITE (no repo secret, relay injects the key); the relay
 #    remains the declared build.json fallback for local/dagu runs only.
-_yml="$ROOT/1_cicd/src/cicd/cgc-db-index.yml"
+_yml="$ROOT/.github/workflows/cgc-db-index.yml"
 ck "index job passes secrets.OPENROUTER_API_KEY to the env" \
    "$(python3 -c "
 import sys
@@ -85,12 +85,13 @@ print('yes' if live else 'no')" "$_yml")" "yes"
 # restore-all legitimately keeps its WireGuard step (one job, ssh propagation
 # to the box, no slot contention) — only the fan-out MATRIX must be mesh-free,
 # so the assertion is scoped to the region before restore-all.
-ck "index matrix no longer crosses the mesh (no WireGuard step)" \
+# The whole index workflow, not just the matrix: restore-all (the only mesh user) lives in
+# cloud-infra's cgc-db-restore.yml since the public/private split.
+ck "index workflow never crosses the mesh (no WireGuard step)" \
    "$(python3 -c "
 import sys
 s=open(sys.argv[1],encoding='utf8').read()
-matrix=s[:s.index('restore-all:')]
-print('no' if 'cloud-ship-ci-setup-wireguard' in matrix else 'yes')" "$_yml")" "yes"
+print('no' if ('cloud-ship-ci-setup-wireguard' in s or 'WG_PRIVATE_KEY' in s) else 'yes')" "$_yml")" "yes"
 
 # 6) the force path must be wired end to end, or a fixed indexer silently
 #    re-skips every repo whose HEAD did not move. Three links, all breakable

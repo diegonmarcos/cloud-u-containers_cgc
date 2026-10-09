@@ -1,42 +1,37 @@
 # ┌──────────────────────────────────────────────────────────────┐
-# │  cloud-cgc octocode DB — TWO-PHASE ORCHESTRATOR.            │
+# │  cloud-cgc octocode DB — PUB surface orchestrator.           │
 # │                                                              │
-# │  Schedule + workflow_dispatch entry point. Carries ZERO      │
-# │  logic: it only chains the reusable cgc-db-index.yml twice,   │
-# │  once per phase, in order.                                   │
+# │  semantic → graphrag over the PUBLIC index repos only        │
+# │  (index_repos − private_repos in cloud-u-containers'         │
+# │  user-ai_cloud-cgc-pub-mcp/build.json), then asks cloud-infra│
+# │  to restore the PUB surface (octocode_db volume +            │
+# │  kg_store_pub) on oci-apps.                                  │
 # │                                                              │
-# │    1. semantic — structural FastEmbed index (USE_LLM=false), │
-# │       change-gated on the .cgc-manifest-semantic.json commit │
-# │       per repo.                                              │
-# │    2. graphrag — LLM relationship enrichment (USE_LLM=true),  │
-# │       runs ONLY after semantic succeeds, change-gated on its │
-# │       OWN .cgc-manifest-graphrag.json so it is not skipped    │
-# │       by semantic having advanced HEAD.                      │
+# │  The PVT surface has its own orchestrator in the private     │
+# │  repo diegonmarcos/cloud-u-containers_cgc-pvt, which calls   │
+# │  the same reusable cgc-db-index.yml pinned by sha. Spec:     │
+# │  a0_docs/eng-specs/cgc-public-private-split.md               │
 # │                                                              │
-# │  Schedule is data-driven from build.json                     │
-# │    runtime.octocode.update.schedule (twice daily 4/16 UTC).  │
-# │                                                              │
-# │  workflow_dispatch supports running a SINGLE phase manually   │
-# │  via the `phase` input (both | semantic | graphrag).        │
+# │  Schedule twice daily (4/16 UTC, build.json                  │
+# │  runtime.octocode.update.schedule). Scheduled runs are inert │
+# │  until repo variable CGC_SCHEDULE_ENABLED=true (the cutover  │
+# │  switch); workflow_dispatch always runs.                     │
 # └──────────────────────────────────────────────────────────────┘
 
-name: "cgc-db (two-phase octocode index → GHCR → oci-apps)"
-# #418: a queued run has zero jobs and the API does not return dispatch inputs, so
-# with queue:max holding several runs nobody could tell whether "the forced
-# cloud-infra reindex" was already waiting — a duplicate costs hours, a missing one
-# blocks #375. The title carries every dispatch input (the tester derives the list
-# from `inputs:` below, so a new input that is not surfaced here goes RED).
+name: "cgc-db (pub surface: two-phase octocode index → GHCR → oci-apps)"
+# Every dispatch input is surfaced in the title (#418: a queued run has no jobs and the API
+# does not return dispatch inputs; cgc-db-queue-no-eviction.test.sh derives the list).
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
-      && format('cgc-db · dispatch · phase={0} repos={1} force={2} restore={3} surfaces={4}',
-                inputs.phase, inputs.repos || 'all', inputs.force, inputs.restore, inputs.surfaces)
-      || format('cgc-db · {0}', github.event_name) }}
+      && format('cgc-db pub · dispatch · phase={0} repos={1} force={2} restore={3}',
+                inputs.phase, inputs.repos || 'all', inputs.force, inputs.restore)
+      || format('cgc-db pub · {0}', github.event_name) }}
 
 on:
   workflow_dispatch:
     inputs:
       phase:
-        description: "Which phase(s) to run manually."
+        description: "Which phase(s) to run."
         required: false
         default: both
         type: choice
@@ -45,79 +40,77 @@ on:
           - semantic
           - graphrag
       repos:
-        description: "Optional space/comma-separated subset of index_repos to run (default: all). Use to re-run one repo without paying for a full 8-repo cycle."
+        description: "Optional space/comma-separated subset of the PUBLIC index repos (default: all)."
         required: false
         default: ""
         type: string
       restore:
-        description: "Propagate the result to the box afterwards (default true). Set false when the run only publishes repos the target volume filters out anyway, so the ~50min restore-all buys nothing."
+        description: "Ask cloud-infra to restore the pub surface afterwards (default true)."
         required: false
         default: true
         type: boolean
       force:
-        description: "Reindex even when HEAD matches the phase manifest. Use after an INDEXER change (fixed LLM endpoint, new embedding model) — the manifest keys on HEAD alone, so an unchanged repo indexed badly would otherwise never be reindexed."
+        description: "Reindex even when HEAD matches the phase manifest (indexer change)."
         required: false
         default: false
         type: boolean
-      surfaces:
-        description: "Which DB surfaces the restore propagates to. 'pvt' repairs the private volume without re-paying the ~50 min public restore, which is the whole reason this input exists."
-        required: false
-        default: both
-        type: choice
-        options:
-          - both
-          - pub
-          - pvt
-  # Schedule is data-driven from build.json runtime.octocode.update.schedule.
-  # Twice daily (4:00 and 16:00 UTC): keeps the graph current with minimal runner
-  # load. Each phase is change-gated per repo (skips repos whose HEAD is already
-  # indexed in that phase's manifest) so unchanged repos cost seconds, not hours.
   schedule:
     - cron: "0 4,16 * * *"
 
-# Serialise cgc-db against ITSELF, not against the deploy fleet.
-#
-# This used to be `group: ship-wg-runner`. Workflow-level concurrency holds the
-# group for the WHOLE run, so the 8-way index matrix — which touches no mesh at
-# all (it pushes to GHCR and calls openrouter.ai over the public internet, and
-# carries neither a `WireGuard up` step nor an SSH key) — sat on the fleet's
-# single deploy lock for as long as it ran. On 2026-09-09 run 34329534560
-# (`phase · semantic / cgc-db · semantic · cloud-u-android`, an INDEX matrix job)
-# was still going 91 minutes after its eight siblings finished, holding the group
-# with a Deploy pending behind it and nothing running. GitHub keeps exactly one
-# pending entry per group, so the next deploy to queue evicted that pending one as
-# a grey "cancelled" — a whole day of container deploys silently did not happen.
-#
-# Only `restore-all` in cgc-db-index.yml needs the mesh identity, so only
-# restore-all declares ship-wg-runner now, at job level. What stays here is the
-# narrower guarantee this workflow actually needs: two cgc-db runs must not
-# overlap, because they write the same per-phase manifest and the same per-repo
-# GHCR tags. cancel-in-progress is false so a running semantic→graphrag chain is
-# NEVER cancelled mid-flight — the sequential chain always completes.
-#
-# #418: `queue: max`. Without it a group holds ONE running and ONE pending run,
-# and every newer entrant CANCELS the pending one before it has started a single
-# job. Measured 2026-09-24 over the last 40 runs: 20 ended `cancelled`, 6 of the 8
-# workflow_dispatch reindexes among them — each with zero jobs, i.e. it never
-# executed. 35908826779 (schedule) was cancelled at 08:53:55Z, one second after
-# schedule 35977946827 was created. A forced reindex (#352/#375) cannot survive
-# that: the next cron evicts it. max = FIFO, up to 100 waiting, nothing evicted.
+# Two runs of THIS orchestrator must not overlap: they write the same per-repo GHCR tags
+# and chunk state. cancel-in-progress false so a running semantic→graphrag chain is never
+# cancelled; queue: max so a dispatch is never evicted by the next cron (#418). The pvt
+# orchestrator writes a DISJOINT set of images (the private repos'), so it needs no shared
+# group; the only shared writer risk is the legacy cloud-infra pipeline, handled by the
+# `guard` job below because concurrency groups do not span repositories.
 concurrency:
   group: cgc-db
   cancel-in-progress: false
   queue: max
 
 jobs:
-  # #418: the price of `queue: max`. One run keeps its jobs busy ~14h (35840158564:
-  # 19:03Z -> 09:27Z next day) and cron fires every 12h, so an unbounded FIFO of
-  # scheduled runs would grow forever and a dispatch would wait behind all of them.
-  # A scheduled run that reaches the front while a NEWER scheduled run is already
-  # queued is redundant — same inputs (all repos, both phases, change-gated), and
-  # the newer one clones newer HEADs. So it cancels ITSELF, naming its successor:
-  # conclusion `cancelled`, never a green run that did nothing. Dispatches are never
-  # coalesced — their inputs (repos, force, phase) are what the requester asked for.
+  guard:
+    name: "guard · schedule switch + legacy drain"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+    steps:
+      - name: Scheduled runs only after cutover
+        if: ${{ github.event_name == 'schedule' && vars.CGC_SCHEDULE_ENABLED != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::notice::CGC_SCHEDULE_ENABLED is not 'true' — the legacy cloud-infra cgc-db.yml still owns the schedule; cancelling this scheduled run"
+          gh run cancel "${{ github.run_id }}" -R "${{ github.repository }}"
+          sleep 300
+          exit 1
+      - name: Refuse to overlap the legacy cloud-infra pipeline
+        # The legacy cloud-infra cgc-db.yml writes the same cgc-db-<repo>:latest tags and
+        # chunk state. A run of it still queued or running when this one starts would race
+        # this run's checkpoints (last publish wins, the other's windows are lost). Public
+        # API, no token. 404 = the legacy workflow file is gone (post-cutover) = drained.
+        run: |
+          set -eu
+          URL="https://api.github.com/repos/diegonmarcos/cloud-infra/actions/workflows/cgc-db.yml/runs?per_page=50"
+          code=$(curl -s -o legacy.json -w '%{http_code}' "$URL")
+          case "$code" in
+            404) echo "[cgc-db] legacy cloud-infra cgc-db.yml no longer exists — drained"; exit 0 ;;
+            200) : ;;
+            *)   echo "::error::cannot read legacy run state (HTTP $code) — refusing rather than risking two writers on the same GHCR tags"; exit 1 ;;
+          esac
+          LIVE=$(jq -r '[.workflow_runs[] | select(.status != "completed") | .id] | join(" ")' legacy.json)
+          if [ -n "$LIVE" ]; then
+            echo "::error::legacy cloud-infra cgc-db.yml run(s) still live: $LIVE — they write the same cgc-db-<repo>:latest tags; this run waits for them to finish (re-dispatch afterwards)"
+            exit 1
+          fi
+          echo "[cgc-db] no live legacy run — proceeding"
+
+  # #418: a scheduled run that reaches the front while a NEWER scheduled run waits behind it
+  # is redundant (same inputs, older HEADs): it cancels ITSELF. Dispatches never coalesce.
   coalesce:
     name: "coalesce · newer scheduled run queued?"
+    needs: guard
     if: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     permissions:
@@ -127,8 +120,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ME: ${{ github.run_id }}
-          # The tester (9_others/test/cgc-db-queue-no-eviction.test.sh) extracts and
-          # EXECUTES this filter. Run ids are monotonic, so "newer" is `.id > ME`.
+          # cgc-db-queue-no-eviction.test.sh extracts and EXECUTES this filter.
           SUPERSEDED_BY: '[.workflow_runs[] | select(.event == "schedule" and .status != "completed" and .id > (env.ME | tonumber)) | .id] | max // empty'
         run: |
           NEWER=$(gh api "repos/${{ github.repository }}/actions/workflows/cgc-db.yml/runs?event=schedule&per_page=50" --jq "$SUPERSEDED_BY")
@@ -139,94 +131,71 @@ jobs:
           echo "::error::cancel of run $ME did not take effect within 300s"
           exit 1
 
-  # Phase 1 — structural semantic index. Runs unless the manual dispatch asked for
-  # graphrag only. On schedule (event_name != workflow_dispatch) it always runs.
   semantic:
     name: "phase · semantic"
-    # needs coalesce, which is SKIPPED on dispatch — hence !cancelled() (a status
-    # function), without which a skipped need would skip this job too.
-    needs: coalesce
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both' || inputs.phase == 'semantic') }}
+    # coalesce is SKIPPED on dispatch; !cancelled() keeps a skipped need from skipping this.
+    needs: [guard, coalesce]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both' || inputs.phase == 'semantic') }}
     uses: ./.github/workflows/cgc-db-index.yml
     with:
       phase: semantic
-      # Empty on schedule (github.event.inputs is null there) = all repos.
+      surface: pub
       repos: ${{ github.event.inputs.repos || '' }}
-      # Scheduled runs have no inputs and must always propagate, hence the
-      # "not explicitly false" form rather than a plain truthy check.
-      restore: ${{ github.event.inputs.restore != 'false' }}
-      # Null on schedule (github.event.inputs is null there) = both surfaces.
-      surfaces: ${{ github.event.inputs.surfaces || 'both' }}
-      # Null on schedule = 'false' = honour the manifest (the daily run must stay incremental).
       force: ${{ github.event.inputs.force || 'false' }}
-    secrets: inherit
+    secrets:
+      CGC_GHCR_PAT: ${{ secrets.CGC_GHCR_PAT }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
-  # Phase 2 — GraphRAG LLM enrichment. On a full run it waits for semantic; a
-  # graphrag-only manual dispatch skips that dependency entirely (needs is conditional).
-  #
-  # `failure` is ACCEPTED, not just success. Since the per-repo split, semantic is a
-  # fail-fast:false matrix — one repo failing is the NORMAL case (a private repo with
-  # no checkpoint image, a transient push drop), and it makes the whole reusable-
-  # workflow result `failure` even when every other repo published fine. Gating on
-  # `success` therefore skipped GraphRAG for ALL repos whenever ANY single repo failed:
-  # run 32574580997 indexed 6 of 8 repos cleanly and still produced zero graph nodes.
-  # That gate was correct for the old SERIAL job (all-or-nothing); it is wrong for a
-  # per-repo matrix, where each graphrag job restores its own repo's image and stands
-  # or falls alone. `cancelled` stays excluded — that means the operator stopped the run.
-  # `cancelled` of the semantic NEEDS result is accepted too (2026-10-05, run 37300450193):
-  # GitHub cancels a job it cannot get a hosted runner for ("The job was not acquired by
-  # Runner of type hosted even after multiple attempts", ~15 min, no steps run), and a
-  # matrix-leg loss or a 330-min job timeout makes the whole semantic result `cancelled`.
-  # That is NOT an operator stop — an operator stop cancels the RUN, and !cancelled() below
-  # (run-level) still blocks that. Gating on the needs result skipped GraphRAG for every repo.
-  # !cancelled(), not always(): always() starts this job even in a CANCELLED run, so a
-  # run the operator stopped — or that #418's coalesce job cancelled — still ran graphrag.
+  # graphrag accepts a semantic `failure` (one repo failing in a fail-fast:false matrix is
+  # normal) and `cancelled` (a lost hosted-runner leg), not an operator stop: the run-level
+  # !cancelled() still blocks that. !cancelled(), never always() (always() runs in a
+  # cancelled run).
   graphrag:
     name: "phase · graphrag"
-    needs: semantic
+    needs: [guard, semantic]
     if: >-
       ${{
         !cancelled()
+        && needs.guard.result == 'success'
         && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both' || inputs.phase == 'graphrag')
         && (needs.semantic.result == 'success' || needs.semantic.result == 'skipped' || needs.semantic.result == 'failure' || needs.semantic.result == 'cancelled')
       }}
     uses: ./.github/workflows/cgc-db-index.yml
     with:
       phase: graphrag
-      # Empty on schedule (github.event.inputs is null there) = all repos.
+      surface: pub
       repos: ${{ github.event.inputs.repos || '' }}
-      # Scheduled runs have no inputs and must always propagate, hence the
-      # "not explicitly false" form rather than a plain truthy check.
-      restore: ${{ github.event.inputs.restore != 'false' }}
-      # Null on schedule (github.event.inputs is null there) = both surfaces.
-      surfaces: ${{ github.event.inputs.surfaces || 'both' }}
-      # Null on schedule = 'false' = honour the manifest (the daily run must stay incremental).
       force: ${{ github.event.inputs.force || 'false' }}
-    secrets: inherit
+    secrets:
+      CGC_GHCR_PAT: ${{ secrets.CGC_GHCR_PAT }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
-  # Phase 3 — restore retry. restore-all is a single job; if GitHub cannot hand it a hosted
-  # runner it is CANCELLED after ~15 min with no steps run (dispatch 37250416702: graphrag
-  # indexed + checkpointed cloud-infra and cloud-u-containers to GHCR, then restore-all
-  # "was not acquired by Runner of type hosted even after multiple attempts", so nothing
-  # reached oci-apps). Nothing inside the lost job can retry itself, so one more restore-only
-  # pass runs here. `!cancelled()` is the RUN-level function: an operator/unjam cancel of the
-  # run still stops this; only a lost job inside a live run triggers it. Restore is idempotent
-  # (box re-pulls the per-repo GHCR images), so a spurious retry costs time, not correctness.
-  restore-retry:
-    name: "phase · restore-retry"
-    needs: [semantic, graphrag]
+  # Propagation onto oci-apps needs the WireGuard mesh and SSH. Both stay in cloud-infra:
+  # the gha-runner WireGuard peer is ONE slot shared with every fleet deploy, serialised by
+  # cloud-infra's ship-wg-runner concurrency group, and a group cannot span repositories.
+  # So this job only DISPATCHES cloud-infra's cgc-db-restore.yml for the pub surface, pinned
+  # to this run's commit. The token can do nothing but start that workflow (fine-grained,
+  # cloud-infra only, Actions: read and write).
+  restore:
+    name: "restore · dispatch cloud-infra cgc-db-restore (pub)"
+    needs: [guard, semantic, graphrag]
     if: >-
       ${{
         !cancelled()
+        && needs.guard.result == 'success'
         && github.event.inputs.restore != 'false'
-        && (needs.semantic.result == 'cancelled' || needs.graphrag.result == 'cancelled')
+        && (needs.semantic.result != 'skipped' || needs.graphrag.result != 'skipped')
       }}
-    uses: ./.github/workflows/cgc-db-index.yml
-    with:
-      phase: graphrag
-      restore_only: true
-      repos: ${{ github.event.inputs.repos || '' }}
-      restore: true
-      surfaces: ${{ github.event.inputs.surfaces || 'both' }}
-      force: 'false'
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Dispatch the pub-surface restore in cloud-infra
+        env:
+          GH_TOKEN: ${{ secrets.CLOUD_INFRA_DISPATCH_TOKEN }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eu
+          [ -n "$GH_TOKEN" ] || { echo "::error::CLOUD_INFRA_DISPATCH_TOKEN is not set in this repo — the index published to GHCR but oci-apps was NOT refreshed. Set the secret, or run cloud-infra's cgc-db-restore.yml by hand with surfaces=pub cgc_ref=${{ github.sha }}"; exit 1; }
+          gh workflow run cgc-db-restore.yml -R diegonmarcos/cloud-infra \
+            -f surfaces=pub -f cgc_ref="${{ github.sha }}" -f source="$SOURCE"
+          echo "[cgc-db] dispatched cloud-infra cgc-db-restore.yml surfaces=pub cgc_ref=${{ github.sha }} (source $SOURCE)"

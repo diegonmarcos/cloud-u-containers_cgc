@@ -145,7 +145,9 @@ swap_line=$(grep -n '^# ── 4) swap' "$SRC_SH" | cut -d: -f1)
 # ── src and dist must behave identically ───────────────────────────────────
 # dist is what is actually shipped to the box (cgc-db-index.yml scp's the dist copy),
 # so a src-only fix reaches nobody.
-if [ -f "$DIST_SH" ]; then
+if [ ! -d "$REPO_ROOT/1_cicd/dist" ]; then
+  ok "no dist step in this repo: src is the copy that ships (fetched at the pinned cgc_ref)"
+elif [ -f "$DIST_SH" ]; then
   src_fn="$(awk '/^zero_content_projects\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$SRC_SH")"
   dist_fn="$(awk '/^zero_content_projects\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$DIST_SH")"
   [ -n "$dist_fn" ] && [ "$src_fn" = "$dist_fn" ] \

@@ -941,8 +941,19 @@ if [ -n "$CONTAINER" ]; then
         fi
       }
 
-      kg_refresh "$PUB_CONTAINER" "$KG_PUBLIC_REPOS" 'KG_STORE_PASS="$KG_STORE_PASS_PUB" sh /app/reindex.sh'
-      kg_refresh "$PVT_CONTAINER" "${STAGED_REPOS# }" 'sh /app/reindex.sh'
+      # SURFACE SPLIT: each surface's restore refreshes ONLY its own kg-store. The pub
+      # pipeline (cloud-u-containers_cgc) and the pvt pipeline (cloud-u-containers_cgc-pvt)
+      # each restore their own surface; a pub pass that also wrote kg_store_pvt would
+      # make the public pipeline a writer of the private store. kg_store_pvt still gets
+      # the public repos: the pvt pass stages every index repo (CGC_INCLUDE_PRIVATE=1).
+      # CGC_KG_REFRESH=both restores the legacy behaviour (both stores on every pass).
+      case "${CGC_KG_REFRESH:-surface}" in
+        both) _kg_pub=1; _kg_pvt=1 ;;
+        *)    if [ "${CGC_INCLUDE_PRIVATE:-0}" = "1" ]; then _kg_pub=0; _kg_pvt=1; else _kg_pub=1; _kg_pvt=0; fi ;;
+      esac
+      [ "$_kg_pub" = 1 ] && kg_refresh "$PUB_CONTAINER" "$KG_PUBLIC_REPOS" 'KG_STORE_PASS="$KG_STORE_PASS_PUB" sh /app/reindex.sh'
+      [ "$_kg_pvt" = 1 ] && kg_refresh "$PVT_CONTAINER" "${STAGED_REPOS# }" 'sh /app/reindex.sh'
+      echo "[cgc-db-restore-all] kg-store refresh scope: pub=$_kg_pub pvt=$_kg_pvt (CGC_KG_REFRESH=${CGC_KG_REFRESH:-surface}, include_private=${CGC_INCLUDE_PRIVATE:-0})"
     else
       echo "[cgc-db-restore-all] kg-store refresh skipped — no repos staged this run"
     fi
