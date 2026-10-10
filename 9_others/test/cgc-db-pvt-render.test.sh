@@ -1,5 +1,5 @@
 #!/bin/sh
-# The private orchestrator (cloud-u-containers_cgc-pvt) is RENDERED from this repo's
+# The private orchestrator (cloud-me_cgc) is RENDERED from this repo's
 # .github/workflows/cgc-db.yml by 9_others/render-pvt-orchestrator.py. A pub edit that
 # breaks a substitution must fail HERE, before anyone bumps the private pin onto it.
 set -eu

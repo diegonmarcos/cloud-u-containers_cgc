@@ -11,7 +11,7 @@
 # │                                                              │
 # │  CALLERS (one per surface, never both from one repo):        │
 # │    pub  ./.github/workflows/cgc-db.yml in THIS repo (public) │
-# │    pvt  diegonmarcos/cloud-u-containers_cgc-pvt (private),   │
+# │    pvt  diegonmarcos/cloud-me_cgc (private),                 │
 # │         uses: …/cgc-db-index.yml@<sha> with cgc_ref: <sha>   │
 # │                                                              │
 # │  A called workflow runs in the CALLER's context: its jobs,   │

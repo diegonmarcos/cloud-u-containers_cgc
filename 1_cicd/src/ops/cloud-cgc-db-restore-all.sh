@@ -957,7 +957,7 @@ if [ -n "$CONTAINER" ]; then
       }
 
       # SURFACE SPLIT: each surface's restore refreshes ONLY its own kg-store. The pub
-      # pipeline (cloud-u-containers_cgc) and the pvt pipeline (cloud-u-containers_cgc-pvt)
+      # pipeline (cloud-u-containers_cgc) and the pvt pipeline (cloud-me_cgc)
       # each restore their own surface; a pub pass that also wrote kg_store_pvt would
       # make the public pipeline a writer of the private store. kg_store_pvt still gets
       # the public repos: the pvt pass stages every index repo (CGC_INCLUDE_PRIVATE=1).

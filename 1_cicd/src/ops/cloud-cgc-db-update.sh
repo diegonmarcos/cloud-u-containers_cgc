@@ -50,7 +50,7 @@ BJ="${CGC_BUILD_JSON:-$ROOT/a_solutions/user-ai_cloud-cgc-pub-mcp/build.json}"
 # the index loop. See the PUBLIC-LOG REDACTION note at octo_log_redact.
 cgc_repo_is_private() { # $1 = local repo name -> rc 0 = treat as private (redact)
   [ "${CGC_LOG_REDACT:-}" = "1" ] && return 0
-  # off: set ONLY by the private caller (cloud-u-containers_cgc-pvt), whose Actions logs
+  # off: set ONLY by the private caller (cloud-me_cgc), whose Actions logs
   # are private, after cgc-db-index.yml has verified through the API that the calling
   # repository is private. Full logs there are what makes a failed private index debuggable.
   [ "${CGC_LOG_REDACT:-}" = "off" ] && return 1
@@ -159,7 +159,7 @@ done
 #   CGC_SURFACE=pub  diegonmarcos/cloud-u-containers_cgc (PUBLIC; its Actions logs are
 #                    public). Private repos are outside its universe entirely: dropped
 #                    from the default list, never cloned, and refused when named.
-#   CGC_SURFACE=pvt  diegonmarcos/cloud-u-containers_cgc-pvt (PRIVATE). Any index repo.
+#   CGC_SURFACE=pvt  diegonmarcos/cloud-me_cgc (PRIVATE). Any index repo.
 #   unset            the legacy single pipeline in cloud-infra; behaviour unchanged.
 # cgc-db-index.yml sets it from its `surface` input and refuses surface=pvt unless the
 # calling repository is private.

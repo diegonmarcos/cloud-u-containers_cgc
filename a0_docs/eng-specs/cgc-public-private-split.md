@@ -4,6 +4,12 @@ Status: phases 1-2 done (2026-10-09): both repos live, CI and leak scan green, p
 7fdcf5f, cloud-infra `cgc-db-restore.yml` live (dispatch-only). Phase 3 (first green run) waits on repository
 secrets (section 8); phases 4-5 follow the order in section 7.
 
+2026-10-10: the private repo was renamed `cloud-u-containers_cgc-pvt` -> **`cloud-me_cgc`**
+(owner: "private cgc must also run from our private cloud-me repo", section 1). Its runs are
+additionally blocked at ACCOUNT level: private repos have used the month's included Actions
+minutes and the Actions budget stops further use (section 9). Until both blockers clear, the
+legacy cloud-infra `cgc-db.yml` (surfaces=both) stays the producer of the pvt surface.
+
 Spec for the indexer itself (chunk windows, manifests, GraphRAG on top of semantic):
 `a0_docs/eng-specs/cgc-incremental-chunked.md` (moved here from cloud-infra; its paths
 are relative to this repo, the layout is the same).
@@ -15,12 +21,15 @@ The cgc pipeline left cloud-infra and was split by **surface**:
 | Repo | Visibility | Holds | Indexes |
 |---|---|---|---|
 | `diegonmarcos/cloud-u-containers_cgc` (this repo) | public | all pipeline code (scripts, chunk planner, packaging, restore script, testers, specs), the reusable `cgc-db-index.yml`, the **pub** orchestrator `cgc-db.yml` | the 6 public repos |
-| `diegonmarcos/cloud-u-containers_cgc-pvt` | **private** | the **pvt** orchestrator only; calls this repo's `cgc-db-index.yml` pinned by sha | the 2 private repos |
+| `diegonmarcos/cloud-me_cgc` (was `cloud-u-containers_cgc-pvt`) | **private** | the **pvt** orchestrator only; calls this repo's `cgc-db-index.yml` pinned by sha | the 2 private repos |
 | `diegonmarcos/cloud-infra` | public | `cgc-db-restore.yml`: restore-all onto oci-apps for one surface per run (WireGuard + SSH + `ship-wg-runner` lock) | nothing |
 
 Naming: the code ran as part of the cloud-u-containers service `user-ai_cloud-cgc-pub-mcp`
 (its build.json is the pipeline's config), and split-outs are named `<parent>_<name>`
-(registry: `git-repos-master/repos.json`, group `a_cloud`).
+(registry: `git-repos-master/repos.json`, group `a_cloud`). Private repos belong to the
+`cloud-me` family (`cloud-me` is its link-only master; `cloud-me_vault`, `cloud-me_configs`,
+...), while every `cloud-u-*` repo is public, so the private half is `cloud-me_<name>` =
+`cloud-me_cgc` (renamed 2026-10-10; GitHub redirects the old name).
 
 ### Why a separate private repo, not cloud-infra
 
@@ -79,7 +88,7 @@ Also noted: cloud-u-containers carries its own `user-ai_cloud-cgc-pub-mcp/src/cl
 
 | | **pub** | **pvt** |
 |---|---|---|
-| Orchestrator | `cloud-u-containers_cgc/.github/workflows/cgc-db.yml` | `cloud-u-containers_cgc-pvt/.github/workflows/cgc-db.yml` |
+| Orchestrator | `cloud-u-containers_cgc/.github/workflows/cgc-db.yml` | `cloud-me_cgc/.github/workflows/cgc-db.yml` |
 | Logs | public | private |
 | Repos indexed | cloud-infra, cloud-infra-desktop, front (= diegonmarcos.github.io), front-data, cloud-u-containers, cloud-u-android | cloud-data, cloud-data-my-ai-memory |
 | Repo set source | `index_repos − private_repos` (build.json), each verified public via unauthenticated GitHub API at run time | `private_repos` |
@@ -243,7 +252,7 @@ renamed onto this layout. Source: cloud-infra `9676011e1`. 143 commits, authorsh
 | `CLOUD_INFRA_DISPATCH_TOKEN` | fine-grained PAT, repository `diegonmarcos/cloud-infra` only, Actions: read and write | dispatch `cgc-db-restore.yml surfaces=pub` |
 | variable `CGC_SCHEDULE_ENABLED` | repo variable, `true` at cutover | schedule switch |
 
-`cloud-u-containers_cgc-pvt` (private):
+`cloud-me_cgc` (private):
 
 | Secret | Scope | Why |
 |---|---|---|
@@ -256,3 +265,24 @@ renamed onto this layout. Source: cloud-infra `9676011e1`. 143 commits, authorsh
 
 `cloud-infra`: unchanged (`CGC_GHCR_PAT` for the box's GHCR login on the pvt restore,
 `WG_PRIVATE_KEY`, `OCI_SSH_KEY`, `vars.WG_HUB_PUBKEY`).
+
+## 9. Runners and billing (2026-10-10)
+
+Every job of the private repo uses GitHub-hosted `ubuntu-latest`; nothing in either surface
+runs on the oci-apps self-hosted runners (`oci-apps-arm64*`), and the private repo has no
+runner of its own. Hosted minutes are free for public repos and come out of the account's
+monthly included quota for private ones. In October 2026 the private repos used about
+3,000 Linux minutes (cloud-me_configs ~1,880, cloud-data-my-ai-memory ~720, cloud-data
+~350, others ~60), and from 2026-10-09 every private-repo job ends in ~3 s with no runner
+and the annotation "The job was not started because an Actions budget is preventing further
+use." This hits all private repos (cloud-data-my-ai-memory's CI the same way), not only
+this pipeline.
+
+Cost of the pvt surface once it runs: the two private repos took ~7 min each per
+change-gated cycle in cloud-infra (run 38044529950), so twice-daily runs are roughly 30-40
+hosted minutes a day, ~1,000 a month (about $6 at $0.006/min beyond the quota).
+
+To unblock (account owner, github.com > Settings > Billing and licensing > Budgets and
+alerts): raise the Actions budget above $0, or turn off "Stop usage when budget limit is
+reached" for Actions; or wait for the quota reset on the 1st of the month. A self-hosted
+runner on a non-oci-apps machine is the only other option and is not set up.

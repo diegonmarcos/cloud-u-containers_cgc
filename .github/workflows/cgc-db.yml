@@ -9,9 +9,9 @@
 # │  (per repo: each repo's job runs both phases, #888)          │
 # │                                                              │
 # │  The PVT surface has its own orchestrator in the private     │
-# │  repo diegonmarcos/cloud-u-containers_cgc-pvt, which calls   │
-# │  the same reusable cgc-db-index.yml pinned by sha. Spec:     │
-# │  a0_docs/eng-specs/cgc-public-private-split.md               │
+# │  repo diegonmarcos/cloud-me_cgc (cloud-me family), which     │
+# │  calls the same reusable cgc-db-index.yml pinned by sha.     │
+# │  Spec: a0_docs/eng-specs/cgc-public-private-split.md         │
 # │                                                              │
 # │  Schedule twice daily (4/16 UTC, build.json                  │
 # │  runtime.octocode.update.schedule). Scheduled runs are inert │

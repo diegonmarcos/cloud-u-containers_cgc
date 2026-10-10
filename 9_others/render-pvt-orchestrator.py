@@ -3,7 +3,7 @@
 
     python3 9_others/render-pvt-orchestrator.py <cgc-sha> [path/to/cgc-db.yml] > cgc-db.yml
 
-diegonmarcos/cloud-u-containers_cgc-pvt (private) commits the output as its
+diegonmarcos/cloud-me_cgc (private) commits the output as its
 .github/workflows/cgc-db.yml. Its tester re-renders from the pinned sha and fails on any
 difference, so the two orchestrators cannot drift: every change lands here first and
 reaches the private side as a sha bump.
