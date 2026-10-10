@@ -70,22 +70,29 @@ concurrency:
   queue: max
 
 jobs:
+  # Before the cutover (repo variable CGC_SCHEDULE_ENABLED != 'true') a scheduled run is
+  # inert: `guard` is SKIPPED at job level, every job below needs guard == success, so the
+  # whole run skips with nothing to cancel or fail. This used to be a step that cancelled
+  # its own run and slept; the run then showed as cancelled (or, while the reusable calls
+  # had no permissions block, never started at all: startup_failure, see per-repo).
+  schedule-off:
+    name: "schedule switch · off (pre-cutover, nothing to do)"
+    if: ${{ github.event_name == 'schedule' && vars.CGC_SCHEDULE_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Scheduled runs only after cutover
+        run: echo "::notice::CGC_SCHEDULE_ENABLED is not 'true' — the legacy cloud-infra cgc-db.yml still owns the schedule; this scheduled run skips every job"
+
   guard:
-    name: "guard · schedule switch + legacy drain"
+    name: "guard · legacy drain"
+    if: ${{ github.event_name != 'schedule' || vars.CGC_SCHEDULE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: write
+      actions: read
     steps:
-      - name: Scheduled runs only after cutover
-        if: ${{ github.event_name == 'schedule' && vars.CGC_SCHEDULE_ENABLED != 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "::notice::CGC_SCHEDULE_ENABLED is not 'true' — the legacy cloud-infra cgc-db.yml still owns the schedule; cancelling this scheduled run"
-          gh run cancel "${{ github.run_id }}" -R "${{ github.repository }}"
-          sleep 300
-          exit 1
       - name: Refuse to overlap the legacy cloud-infra pipeline
         # The legacy cloud-infra cgc-db.yml writes the same cgc-db-<repo>:latest tags and
         # chunk state. A run of it still queued or running when this one starts would race
@@ -143,6 +150,16 @@ jobs:
     # coalesce is SKIPPED on dispatch; !cancelled() keeps a skipped need from skipping this.
     needs: [guard, coalesce]
     if: ${{ !cancelled() && needs.guard.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.phase == 'both') }}
+    # Explicit, not inherited: cgc-db-index.yml's `index` job asks for packages: write
+    # (it pushes cgc-db-<repo> checkpoints), and a called job can never hold MORE than its
+    # caller job. Without this block the caller inherits the repo's default token, which
+    # GitHub makes read-only for new repos (this one dates from 2026-10-09), and GitHub then
+    # rejects the whole run before any job starts: startup_failure on scheduled runs
+    # 37987847606 and 38044868048. The legacy cloud-infra copy has no such block and runs,
+    # because that repo's default token is read/write.
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/cgc-db-index.yml
     with:
       phase: both
@@ -159,6 +176,10 @@ jobs:
     # coalesce is SKIPPED on dispatch; !cancelled() keeps a skipped need from skipping this.
     needs: [guard, coalesce]
     if: ${{ !cancelled() && needs.guard.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.phase == 'semantic' }}
+    # Same explicit permissions as per-repo (the called index job needs packages: write).
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/cgc-db-index.yml
     with:
       phase: semantic
@@ -183,6 +204,10 @@ jobs:
         && github.event_name == 'workflow_dispatch' && inputs.phase == 'graphrag'
         && (needs.semantic.result == 'success' || needs.semantic.result == 'skipped' || needs.semantic.result == 'failure' || needs.semantic.result == 'cancelled')
       }}
+    # Same explicit permissions as per-repo (the called index job needs packages: write).
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/cgc-db-index.yml
     with:
       phase: graphrag

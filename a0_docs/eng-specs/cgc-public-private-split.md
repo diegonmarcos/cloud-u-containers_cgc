@@ -123,8 +123,10 @@ front 2022, front-data 29. No private repo in the pub store.
 
 Both new orchestrators start with a `guard` job:
 
-1. scheduled runs cancel themselves unless the repo variable `CGC_SCHEDULE_ENABLED=true`
-   (the cutover switch; dispatch always runs);
+1. scheduled runs skip every job unless the repo variable `CGC_SCHEDULE_ENABLED=true`
+   (the cutover switch; dispatch always runs). `guard` itself is skipped at job level, so a
+   pre-cutover scheduled run ends green (one notice job, every other job skipped), never
+   cancelled or failed;
 2. any run refuses while a run of the **legacy** `cloud-infra/.github/workflows/cgc-db.yml`
    is queued or in progress (public API; 404 after the legacy file is deleted = drained).
    The legacy pipeline writes the same `cgc-db-<repo>:latest` tags and chunk state, and
