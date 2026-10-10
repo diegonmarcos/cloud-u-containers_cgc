@@ -97,11 +97,19 @@ jobs:
         # The legacy cloud-infra cgc-db.yml writes the same cgc-db-<repo>:latest tags and
         # chunk state. A run of it still queued or running when this one starts would race
         # this run's checkpoints (last publish wins, the other's windows are lost). Public
-        # API, no token. 404 = the legacy workflow file is gone (post-cutover) = drained.
+        # API. 404 = the legacy workflow file is gone (post-cutover) = drained.
+        # Authenticated with this run's token: anonymous calls share the hosted runner IP's
+        # 60/h limit and got HTTP 403 on dispatch 38067423142. A 403/429 is retried, since
+        # a rate limit says nothing about the legacy run state.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           URL="https://api.github.com/repos/diegonmarcos/cloud-infra/actions/workflows/cgc-db.yml/runs?per_page=50"
-          code=$(curl -s -o legacy.json -w '%{http_code}' "$URL")
+          for i in 1 2 3 4; do
+            code=$(curl -s -o legacy.json -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" "$URL")
+            case "$code" in 403|429) echo "[cgc-db] legacy run state: HTTP $code (attempt $i/4), retrying in 30s"; sleep 30 ;; *) break ;; esac
+          done
           case "$code" in
             404) echo "[cgc-db] legacy cloud-infra cgc-db.yml no longer exists — drained"; exit 0 ;;
             200) : ;;
