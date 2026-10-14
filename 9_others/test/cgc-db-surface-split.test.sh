@@ -82,18 +82,32 @@ guard = next(s for s in steps if s.get("name","").startswith("Surface guard"))["
 res = next(s for s in steps if s.get("id") == "repos")["run"]
 w("guard", guard); w("resolve", res)
 w("inputs", " ".join(sorted((y.get(True) or y.get("on"))["workflow_call"]["inputs"])))
-w("redact", y["jobs"]["index"]["steps"][-1]["env"].get("CGC_LOG_REDACT"))
+idx_steps = y["jobs"]["index"]["steps"]
+w("redact", next(s for s in idx_steps if s.get("name","").startswith("cgc-db graphrag update"))["env"].get("CGC_LOG_REDACT"))
+w("runs_on", y["jobs"]["index"]["runs-on"])
+w("max_par", y["jobs"]["index"]["strategy"]["max-parallel"])
+w("repos_runs_on", y["jobs"]["repos"]["runs-on"])
+w("runner_default", (y.get(True) or y.get("on"))["workflow_call"]["inputs"]["runner"]["default"])
 PY
 ck "surface is a workflow input" "$(tr ' ' '\n' < "$T/inputs" | grep -cx surface)" "1"
 ck "redaction is switched off only for pvt" "$(cat "$T/redact")" "\${{ inputs.surface == 'pvt' && 'off' || '' }}"
 # Execute the guard with a stubbed gh answering for the caller's visibility.
 mkdir -p "$T/bin"; printf '#!/bin/sh\necho "$STUB_PRIVATE"\n' > "$T/bin/gh"; chmod +x "$T/bin/gh"
-sed 's/\${{ inputs.phase }}/semantic/g' "$T/guard" > "$T/guard.sh"
-guard() { ( PATH="$T/bin:$PATH" STUB_PRIVATE="$2" CGC_SURFACE="$1" CALLER=x/y sh "$T/guard.sh" >/dev/null 2>&1 && echo pass || echo refuse ); }
+sed 's/\${{ inputs.phase }}/semantic/g; s/'"'"'\${{ inputs.runner }}'"'"'/"$RUNNER_T"/' "$T/guard" > "$T/guard.sh"
+# $3 = the runner input (default ubuntu-latest)
+guard() { ( PATH="$T/bin:$PATH" STUB_PRIVATE="$2" CGC_SURFACE="$1" CALLER=x/y RUNNER_T="${3:-ubuntu-latest}" CGC_RUNNER=x sh "$T/guard.sh" >/dev/null 2>&1 && echo pass || echo refuse ); }
 ck "pvt from a PUBLIC caller is refused" "$(guard pvt false)" "refuse"
 ck "pvt from an unknown-visibility caller is refused" "$(guard pvt unknown)" "refuse"
 ck "pvt from a PRIVATE caller passes" "$(guard pvt true)" "pass"
 ck "pub from a public caller passes" "$(guard pub false)" "pass"
+# #951: a self-hosted runner only for the private pvt caller; a public repo never gets one.
+ck "runner input defaults to hosted" "$(cat "$T/runner_default")" "ubuntu-latest"
+ck "pub asking for a self-hosted runner is refused" "$(guard pub false self-hosted)" "refuse"
+ck "pvt from a public caller asking for one is refused" "$(guard pvt false self-hosted)" "refuse"
+ck "pvt from a PRIVATE caller may use its self-hosted runner" "$(guard pvt true self-hosted)" "pass"
+ck "index runs-on: pub always hosted, pvt the caller's choice" "$(cat "$T/runs_on")" "\${{ inputs.surface == 'pvt' && inputs.runner || 'ubuntu-latest' }}"
+ck "index matrix capped at 1 on a self-hosted runner" "$(cat "$T/max_par")" "\${{ (inputs.surface == 'pvt' && inputs.runner != '' && inputs.runner != 'ubuntu-latest') && 1 || 8 }}"
+ck "repo-matrix job stays hosted" "$(cat "$T/repos_runs_on")" "ubuntu-latest"
 # Execute the matrix resolution (minus the network probe) against the fixture.
 mkdir -p "$T/ws/a_solutions/user-ai_cloud-cgc-pub-mcp"; cp "$BJ" "$T/ws/a_solutions/user-ai_cloud-cgc-pub-mcp/build.json"
 awk '/if \[ "\$CGC_SURFACE" = pub \]; then/{exit} {print}' "$T/resolve" | sed "s/'\${{ inputs.repos }}'/\"\$FILTER_IN\"/; s/\${{ inputs.phase }}/semantic/g" > "$T/resolve.sh"
@@ -122,5 +136,6 @@ m pub-ignores-explicit UPD 's/if \[ -n "\${CGC_INDEX_REPOS:-}" \]; then/if false
 m ensure-clones-private UPD 's/if \[ "\$CGC_SURFACE" = "pub" \] \&\& printf/if false \&\& printf/'
 m kg-both-always RST 's/\*)    if \[ "\${CGC_INCLUDE_PRIVATE:-0}" = "1" \]; then _kg_pub=0; _kg_pvt=1; else _kg_pub=1; _kg_pvt=0; fi ;;/*) _kg_pub=1; _kg_pvt=1 ;;/'
 m pvt-from-public IDX 's/\[ "\$PRIV" = "true" \] ||/true ||/'
+m pub-self-hosted IDX "s/runs-on: \${{ inputs.surface == 'pvt' \&\& inputs.runner || 'ubuntu-latest' }}/runs-on: \${{ inputs.runner }}/"
 m pub-matrix-all IDX "s/pub) REPOS_JSON=\$(jq -nc --argjson a \"\$ALL\" --argjson p \"\$PRIV\" '\$a - \$p') ;;/pub) REPOS_JSON=\"\$ALL\" ;;/"
 echo PASS

@@ -272,6 +272,89 @@ out=$(visibility_base cgc-db-base 2>&1)
 { echo "$out" | grep -q "::warning::" && ! echo "$out" | grep -q "::error::" && [ ! -s "$CALL_LOG" ]; } \
   && ok "base: private -> ::warning:: only (nothing to leak, no endpoint to fix it)" || bad "base private: out=[$out] log=[$(cat "$CALL_LOG")]"
 
+echo "── GITHUB_TOKEN push mode (pvt surface, no CGC_GHCR_PAT) ──"
+# Fixture with a declared private repo. The registry is stubbed through curl: the
+# anonymous pull-token probe answers per $STUB_ANON (public|private|absent|garbage) and
+# the credentialed pull,push request per $STUB_PUSH (yes|no). gh answers the caller's
+# own repo lookup with $STUB_CALLER_PRIVATE; any DELETE is logged (there must be none).
+cat > "$W/bj2.json" <<'JSON'
+{"runtime":{"octocode":{"private_repos":["cloud-data"],"repo_map":{"cloud-data":"cloud-data","front":"diegonmarcos.github.io"}}}}
+JSON
+CGC_BUILD_JSON_SAVE="$CGC_BUILD_JSON"; export CGC_BUILD_JSON="$W/bj2.json"
+curl() {
+  case " $* " in
+    *" -K - "*) cat >/dev/null
+      if [ "${STUB_PUSH:-no}" = yes ]; then printf '{"token":"t"}'; else printf '{"errors":[{"code":"DENIED"}]}'; fi ;;
+    *) case "${STUB_ANON:-garbage}" in
+         public)  printf '{"token":"t"}' ;;
+         private) printf '{"errors":[{"code":"UNAUTHORIZED","message":"authentication required"}]}' ;;
+         absent)  printf '{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}' ;;
+         *)       printf '<html>bad gateway</html>' ;;
+       esac ;;
+  esac
+}
+gh() {
+  case "$1 $2" in
+    "api --method") echo "$3 $4" >> "$CALL_LOG"; return 0 ;;
+    "api repos/"*) printf '%s' "${STUB_CALLER_PRIVATE:-}" ;;
+    *) echo "unexpected gh $*" >> "$CALL_LOG"; return 1 ;;
+  esac
+}
+tm() { CGC_SURFACE=pvt GITHUB_REPOSITORY=diegonmarcos/cloud-me_cgc GITHUB_TOKEN=dummy CGC_GHCR_PAT= "$@"; }
+unset CGC_GHCR_PAT
+
+: > "$CALL_LOG"; STUB_CALLER_PRIVATE=true STUB_ANON=absent
+out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && echo "$out" | grep -q "creates it PRIVATE and linked" && [ ! -s "$CALL_LOG" ]; } \
+  && ok "token mode: private repo + no pkg + private caller -> push (born private, linked to the caller)" || bad "case T1: rc=$rc out=[$out] log=[$(cat "$CALL_LOG")]"
+
+: > "$CALL_LOG"; STUB_CALLER_PRIVATE=false STUB_ANON=absent
+out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -ne 0 ] && echo "$out" | grep -q "needs a PRIVATE caller"; } \
+  && ok "token mode: public caller -> refused (its package would be born public)" || bad "case T2: rc=$rc out=[$out]"
+
+: > "$CALL_LOG"; STUB_CALLER_PRIVATE=true STUB_ANON=private STUB_PUSH=yes
+out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && echo "$out" | grep -q "may write it" && ! echo "$out" | grep -q "::error::"; } \
+  && ok "token mode: existing private pkg the token can write -> push" || bad "case T3: rc=$rc out=[$out]"
+
+: > "$CALL_LOG"; STUB_CALLER_PRIVATE=true STUB_ANON=private STUB_PUSH=no
+out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -ne 0 ] && echo "$out" | grep -q "Manage Actions access" && [ ! -s "$CALL_LOG" ]; } \
+  && ok "token mode: existing pkg the token cannot write -> refused with the one-time UI fix" || bad "case T4: rc=$rc out=[$out]"
+
+: > "$CALL_LOG"; STUB_CALLER_PRIVATE=true STUB_ANON=public
+out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -ne 0 ] && echo "$out" | grep -q "PUBLICLY pullable" && [ ! -s "$CALL_LOG" ]; } \
+  && ok "token mode: public pkg -> refused, nothing deleted" || bad "case T5: rc=$rc out=[$out]"
+
+: > "$CALL_LOG"; STUB_CALLER_PRIVATE=true STUB_ANON=garbage
+out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -ne 0 ] && echo "$out" | grep -q "refusing to push blind"; } \
+  && ok "token mode: registry probe unreadable -> refused (unknown is not absent)" || bad "case T6: rc=$rc out=[$out]"
+
+[ "$(tm resolve_repo_source_label cgc-db-cloud-data cloud-data)" = "https://github.com/diegonmarcos/cloud-me_cgc" ] \
+  && ok "token mode: private repo's LABEL names the caller" || bad "case T7: label $(tm resolve_repo_source_label cgc-db-cloud-data cloud-data)"
+[ "$(CGC_SURFACE=pvt CGC_GHCR_PAT=x resolve_repo_source_label cgc-db-cloud-data cloud-data)" = "https://github.com/diegonmarcos/cloud-me_vault" ] \
+  && ok "PAT mode: private repo's LABEL unchanged (cloud-me_vault)" || bad "case T8"
+
+for v in private absent; do
+  : > "$CALL_LOG"; STUB_ANON=$v
+  out=$(tm verify_or_delete_repo_pkg cgc-db-cloud-data cloud-data 2>&1); rc=$?
+  { [ "$rc" -eq 0 ] && ! echo "$out" | grep -q "::error::" && [ ! -s "$CALL_LOG" ]; } \
+    && ok "token mode backstop: not anonymously pullable ($v) -> ok" || bad "case T9 $v: rc=$rc out=[$out]"
+done
+: > "$CALL_LOG"; STUB_ANON=public
+out=$(tm verify_or_delete_repo_pkg cgc-db-cloud-data cloud-data 2>&1); rc=$?
+{ [ "$rc" -ne 0 ] && echo "$out" | grep -q "::error::" && [ ! -s "$CALL_LOG" ]; } \
+  && ok "token mode backstop: public -> loud ::error::, no delete attempted (a GITHUB_TOKEN cannot)" || bad "case T10: rc=$rc out=[$out] log=[$(cat "$CALL_LOG")]"
+
+# Public repos on the pvt surface do not exist, but the mode must not leak into the pub
+# path: a pub-surface run with no PAT is NOT token mode.
+CGC_SURFACE=pub GITHUB_REPOSITORY=x/y CGC_GHCR_PAT= gh_token_push_mode && bad "case T11: pub surface entered token mode" || ok "token mode is pvt-only"
+unset -f curl; unset STUB_ANON STUB_PUSH STUB_CALLER_PRIVATE
+export CGC_BUILD_JSON="$CGC_BUILD_JSON_SAVE"
+
 echo ""
 echo "═══════════════════════════════════════"
 echo "PASS=$pass FAIL=$fail"

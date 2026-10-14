@@ -18,11 +18,16 @@ for ph in ("per-repo", "semantic", "graphrag"):
     if j[ph]["uses"] != f"diegonmarcos/cloud-u-containers_cgc/.github/workflows/cgc-db-index.yml@{sha}": bad.append(f"{ph}: uses {j[ph]['uses']}")
     for k in ("CLOUD_DATA_DEPLOY_KEY", "CLOUD_MY_AI_MEMORY_DEPLOY_KEY"):
         if k not in s: bad.append(f"{ph}: secret {k} not passed")
-run = j["restore"]["steps"][0]["run"]
-if f'-f surfaces=pvt -f cgc_ref="{sha}"' not in run: bad.append("restore does not dispatch surfaces=pvt at the pin")
+    # #951: the private caller's index jobs run on its own self-hosted runner.
+    if w.get("runner") != "self-hosted": bad.append(f"{ph}: runner {w.get('runner')}")
+# #951: no cross-repo dispatch (and so no PAT) in the private orchestrator; cloud-infra pulls.
+if "restore" in j: bad.append("pvt orchestrator still has a restore (dispatch) job")
+txt = open(sys.argv[1]).read()
+for tok in ("CLOUD_INFRA_DISPATCH_TOKEN", "gh workflow run", "secrets.CLOUD_INFRA"):
+    if tok in txt: bad.append(f"pvt orchestrator mentions {tok}")
 if y.get("concurrency", {}).get("group") != "cgc-db": bad.append("concurrency group lost")
 if "guard" not in j: bad.append("guard job lost")
-print("\n".join("  FAIL " + b for b in bad) or "  ok   rendered pvt orchestrator: surface pvt, pinned uses + cgc_ref, deploy keys, pvt restore")
+print("\n".join("  FAIL " + b for b in bad) or "  ok   rendered pvt orchestrator: surface pvt, pinned uses + cgc_ref, self-hosted runner, deploy keys, no dispatch")
 sys.exit(1 if bad else 0)
 PY
 # A wrong sha shape is refused, never rendered.

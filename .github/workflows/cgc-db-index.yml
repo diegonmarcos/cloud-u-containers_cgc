@@ -24,6 +24,11 @@
 # │  phase=both: each repo's job runs semantic, then graphrag in │
 # │  the SAME job, so a repo's graphrag never waits for the      │
 # │  slowest repo's semantic (#888).                             │
+# │                                                              │
+# │  runner: where the heavy `index` job runs. ubuntu-latest     │
+# │  unless the caller is the PRIVATE pvt caller, which may pass │
+# │  its own self-hosted runner (oci-apps, #951): the pub        │
+# │  surface is forced onto ubuntu-latest whatever it passes.    │
 # └──────────────────────────────────────────────────────────────┘
 
 name: "cgc-db-index (reusable octocode index phase)"
@@ -54,12 +59,17 @@ on:
         required: false
         default: ""
         type: string
+      runner:
+        description: "runs-on label for the heavy per-repo `index` job. Honoured ONLY on surface=pvt from a private caller (its own repo-scoped self-hosted runner, e.g. `self-hosted`); the pub surface always runs on ubuntu-latest, and a public repo must never use a self-hosted runner. A non-hosted runner caps the matrix at one job at a time."
+        required: false
+        default: "ubuntu-latest"
+        type: string
     secrets:
       CGC_GHCR_PAT:
-        description: "Classic PAT: write:packages (+ read:packages, delete:packages for the visibility backstop). Pushes cgc-db-<repo> packages, which are linked to their source repos, not to the caller."
+        description: "pub: classic PAT (write:packages, read:packages, delete:packages) — the public packages are linked to their own source repos, so the caller's GITHUB_TOKEN cannot write them. pvt: OPTIONAL — without it the private caller's own GITHUB_TOKEN pushes (packages: write), creating the private packages linked to that private repo (#951)."
         required: false
       OPENROUTER_API_KEY:
-        description: "OpenRouter key for the graphrag phase's LLM calls."
+        description: "OPTIONAL. Direct OpenRouter key for the graphrag phase. Without it graphrag uses build.json's keyless mesh relay (my-ai-api), which only a runner on the fleet's private mesh (the oci-apps self-hosted runner) can reach."
         required: false
       CLOUD_DATA_DEPLOY_KEY:
         description: "pvt only: read-only deploy key for diegonmarcos/cloud-data."
@@ -81,6 +91,8 @@ env:
   GITHUB_ACTOR: ${{ github.actor }}
   CGC_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
   CGC_SURFACE: ${{ inputs.surface }}
+  # The runner the index job actually gets (pub is pinned to hosted, see `index`).
+  CGC_RUNNER: ${{ inputs.surface == 'pvt' && inputs.runner || 'ubuntu-latest' }}
 
 jobs:
   # ── Guard + resolve the repo matrix (data-driven from cloud-u-containers' build.json) ──
@@ -125,6 +137,15 @@ jobs:
             pvt) [ "$PRIV" = "true" ] || { echo "::error::surface=pvt indexes private repos and may only run from a PRIVATE repository (caller $CALLER private=$PRIV): its logs would be public"; exit 1; } ;;
             *)   echo "::error::unknown surface '$CGC_SURFACE' (expected pub|pvt)"; exit 1 ;;
           esac
+          # A public repository must never use a self-hosted runner (any fork PR could run
+          # code on it). The index job already ignores `runner` off the pvt surface; refuse
+          # the request outright so a public caller passing one is told, not silently moved.
+          RUNNER_IN='${{ inputs.runner }}'
+          case "$RUNNER_IN" in
+            ""|ubuntu-latest) : ;;
+            *) [ "$CGC_SURFACE" = pvt ] && [ "$PRIV" = "true" ] || { echo "::error::runner '$RUNNER_IN' requested by $CALLER (surface=$CGC_SURFACE private=$PRIV): only the private pvt caller may use a non-hosted runner"; exit 1; } ;;
+          esac
+          echo "[cgc-db] index job runner: $CGC_RUNNER"
       - uses: actions/checkout@v4
         with:
           repository: diegonmarcos/cloud-u-containers
@@ -168,7 +189,9 @@ jobs:
   index:
     name: "cgc-db · ${{ inputs.phase }} · ${{ matrix.repo }}"
     needs: repos
-    runs-on: ubuntu-latest
+    # pub: always hosted. pvt: the private caller's choice (its self-hosted oci-apps
+    # runner, #951 — hosted minutes of a private repo come out of the account budget).
+    runs-on: ${{ inputs.surface == 'pvt' && inputs.runner || 'ubuntu-latest' }}
     # Job ceiling 350 > every index step's bound (cgc-db-index-budget.test.sh pins
     # budget + 30 <= step and the graphrag deadline, cgc-db-index-step-timeout.test.sh pins
     # step < job): a STEP timeout concludes FAILURE, which the graphrag gates accept; a JOB
@@ -180,7 +203,9 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
-      max-parallel: 8
+      # One job at a time on a self-hosted runner: one registration runs one job anyway,
+      # and the box (oci-apps) keeps serving the fleet while it indexes.
+      max-parallel: ${{ (inputs.surface == 'pvt' && inputs.runner != '' && inputs.runner != 'ubuntu-latest') && 1 || 8 }}
       matrix:
         repo: ${{ fromJson(needs.repos.outputs.repos) }}
     steps:
@@ -189,6 +214,20 @@ jobs:
       # step's deadline can be computed against the job timeout.
       - name: Job clock
         run: echo "CGC_START_TS=$(date +%s)" >> "$GITHUB_ENV"
+      # Self-hosted only: the runner is persistent and shares oci-apps' disk with the fleet.
+      # Refuse early rather than fill the box (the image build needs a few GB), and clear
+      # what a previous job may have left in the runner's home (deploy keys, registry login).
+      - name: Self-hosted preflight (disk, leftovers)
+        if: ${{ env.CGC_RUNNER != 'ubuntu-latest' }}
+        env:
+          CGC_MIN_FREE_GB: "10"
+        run: |
+          set -eu
+          rm -f "$HOME"/.ssh/cgc_* 2>/dev/null || true
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          FREE=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2{print int($4/1048576)}')
+          echo "[cgc-db] self-hosted runner $RUNNER_NAME: ${FREE}G free under $RUNNER_TEMP"
+          [ "$FREE" -ge "$CGC_MIN_FREE_GB" ] || { echo "::error::only ${FREE}G free on the self-hosted runner's disk (need ${CGC_MIN_FREE_GB}G) — refusing to index onto a full box"; exit 1; }
       - uses: actions/checkout@v4
         with:
           repository: diegonmarcos/cloud-u-containers_cgc
@@ -197,6 +236,27 @@ jobs:
         with:
           repository: diegonmarcos/cloud-u-containers
           path: a_solutions
+      # pvt without CGC_GHCR_PAT pushes with this run's GITHUB_TOKEN (#951). An EXISTING
+      # package the token cannot write would only fail at publish time, after hours of
+      # indexing: ask the registry now. Same probes the publish gate uses.
+      - name: GHCR access preflight (pvt, GITHUB_TOKEN push)
+        if: ${{ inputs.surface == 'pvt' && env.CGC_GHCR_PAT == '' }}
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -eu
+          PREFIX=$(jq -r '.per_repo_publish.image_prefix' a_solutions/user-ai_cloud-cgc-pub-mcp/build.json)
+          PKG="${PREFIX##*/}${REPO}"
+          CGC_PKG_SOURCE_ONLY=1 . 1_cicd/src/ops/cloud-cgc-db-package.sh
+          set +e
+          VIS=$(ghcr_anon_visibility "$PKG")
+          echo "[cgc-db] $PKG: anonymous probe says $VIS"
+          case "$VIS" in
+            absent)  echo "[cgc-db] $PKG does not exist yet — this run's GITHUB_TOKEN creates it, private and linked to $GITHUB_REPOSITORY" ;;
+            private) ghcr_token_can_push "$PKG" && echo "[cgc-db] $PKG: this run's GITHUB_TOKEN may push" || { ghcr_token_access_fix "$PKG"; exit 1; } ;;
+            public)  echo "::error::$PKG is publicly pullable but would hold a private repo's index — fix it in the GitHub UI first"; exit 1 ;;
+            *)       echo "::error::ghcr.io did not answer the anonymous probe for $PKG"; exit 1 ;;
+          esac
       - name: Fresh per-repo octocode home
         # Must end in /octocode: update.sh exports XDG_DATA_HOME as this path's parent.
         run: |
@@ -208,11 +268,13 @@ jobs:
         env:
           # phase=both runs THIS step as semantic; graphrag follows in the next step.
           USE_LLM: "false"
-          # Direct OpenRouter, not the mesh-only relay build.json declares: environment is
-          # authoritative over build.json, and this keeps the matrix off the mesh entirely.
-          OPENROUTER_API_URL: https://openrouter.ai/api/v1/chat/completions
+          # Direct OpenRouter WHEN the caller passes a key: environment is authoritative over
+          # build.json, and that keeps a hosted matrix off the mesh. Without a key the three
+          # stay EMPTY, so update.sh falls back to build.json's mesh relay (my-ai-api, which
+          # holds the provider key itself) — reachable from the oci-apps runner (#951).
+          OPENROUTER_API_URL: ${{ secrets.OPENROUTER_API_KEY != '' && 'https://openrouter.ai/api/v1/chat/completions' || '' }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          LLM_HEALTH_URL: https://openrouter.ai/api/v1/models
+          LLM_HEALTH_URL: ${{ secrets.OPENROUTER_API_KEY != '' && 'https://openrouter.ai/api/v1/models' || '' }}
           CGC_MANIFEST_PHASE: semantic
           CGC_INDEX_REPOS: ${{ matrix.repo }}
           CGC_PACKAGE_MODE: per-repo
@@ -248,9 +310,10 @@ jobs:
         timeout-minutes: 340
         env:
           USE_LLM: "true"
-          OPENROUTER_API_URL: https://openrouter.ai/api/v1/chat/completions
+          # Same key-or-relay choice as the semantic step above.
+          OPENROUTER_API_URL: ${{ secrets.OPENROUTER_API_KEY != '' && 'https://openrouter.ai/api/v1/chat/completions' || '' }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          LLM_HEALTH_URL: https://openrouter.ai/api/v1/models
+          LLM_HEALTH_URL: ${{ secrets.OPENROUTER_API_KEY != '' && 'https://openrouter.ai/api/v1/models' || '' }}
           CGC_MANIFEST_PHASE: graphrag
           CGC_INDEX_REPOS: ${{ matrix.repo }}
           CGC_PACKAGE_MODE: per-repo
@@ -270,3 +333,10 @@ jobs:
           [ "$left" -gt 60 ] || left=60
           echo "[cgc-db] graphrag step deadline: ${left}s from now (${CGC_STEP_DEADLINE_MIN}m after the job clock)"
           timeout --kill-after=120 "$left" sh 1_cicd/src/ops/cloud-cgc-db-update.sh
+      # Self-hosted only: leave nothing of this job in the persistent runner's home.
+      - name: Self-hosted cleanup (deploy keys, registry login)
+        if: ${{ always() && env.CGC_RUNNER != 'ubuntu-latest' }}
+        run: |
+          rm -f "$HOME"/.ssh/cgc_* 2>/dev/null || true
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          docker image prune -f >/dev/null 2>&1 || true

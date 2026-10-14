@@ -211,6 +211,12 @@ is_private_repo() { # $1=LOCAL_NAME → rc 0 if private_repos, else 1
 # repo (GHCR package-pull PATs are scoped to the linked repo, not to GHCR as a
 # whole). Public repos are unaffected — they keep linking to their own repo.
 resolve_repo_source_label() { # $1=PKG (for error msg) $2=LOCAL_NAME → stdout: LABEL value; rc 1 (empty stdout) if unresolved
+  if is_private_repo "$2" && gh_token_push_mode; then
+    # GITHUB_TOKEN push mode (see gh_token_push_mode): the token can link a package only
+    # to its OWN repository, the private caller.
+    printf 'https://github.com/%s\n' "$GITHUB_REPOSITORY"
+    return 0
+  fi
   if is_private_repo "$2"; then
     printf 'https://github.com/diegonmarcos/cloud-me_vault\n'
     return 0
@@ -319,8 +325,98 @@ use_github_token_push() { # $1=PKG (for messages) → rc 0 + PUSH_DOCKER_CONFIG 
   echo "[cgc-db] $1: push will be GITHUB_TOKEN-authenticated (throwaway DOCKER_CONFIG) so the package is created PUBLIC"
 }
 
+# GITHUB_TOKEN PUSH MODE — the private surface without a hand-made PAT (#951).
+#
+# The pvt surface runs only from a PRIVATE caller (cgc-db-index.yml's surface guard), and
+# a package that a private repo's GITHUB_TOKEN creates is LINKED to that repo and born
+# PRIVATE: a GITHUB_TOKEN can never create a public package from a private repository,
+# and it has no permission to change a package's visibility at all (only the owner can,
+# in the UI). So in this mode private-by-construction comes from WHO pushes, not from
+# the source LABEL, and the LABEL names the caller (the repo the token belongs to).
+#
+# What a GITHUB_TOKEN cannot do is call /user/packages (no user scope) or DELETE a
+# package. The visibility checks therefore use the registry itself, anonymously: ghcr.io
+# hands an anonymous pull token only for a PUBLIC package. The old delete-on-leak
+# backstop cannot exist in this mode; it is replaced by a loud ::error:: naming the UI
+# fix, which is enough because the only way such a package can become public is an
+# owner's own click.
+#
+# Active only when no CGC_GHCR_PAT is passed AND the surface is pvt. A pvt caller that
+# does pass a PAT keeps the PAT path above unchanged.
+gh_token_push_mode() { # rc 0 = GITHUB_TOKEN push mode
+  [ -z "${CGC_GHCR_PAT:-}" ] && [ "${CGC_SURFACE:-}" = "pvt" ] && [ -n "${GITHUB_REPOSITORY:-}" ]
+}
+
+# Anonymous registry probe → stdout public | private | absent | unknown.
+# ghcr.io answers an anonymous pull-token request with a token only for a public
+# package, UNAUTHORIZED for an existing non-public one and DENIED for a name that does
+# not exist (all three verified 2026-10-14 against cgc-db-cloud-infra, cgc-db-cloud-data
+# and a made-up name). Leak safety never rests on telling private from absent: both
+# mean "anonymous cannot pull", which is the property that matters.
+ghcr_anon_visibility() { # $1=PKG
+  _gav_body=$(curl -s -m 20 "https://ghcr.io/token?scope=repository:${CGC_GHCR_OWNER:-diegonmarcos}/$1:pull" 2>/dev/null) || _gav_body=""
+  if [ -n "$(printf '%s' "$_gav_body" | jq -r '.token // empty' 2>/dev/null)" ]; then
+    echo public; return 0
+  fi
+  case "$(printf '%s' "$_gav_body" | jq -r '.errors[0].code // empty' 2>/dev/null)" in
+    UNAUTHORIZED) echo private ;;
+    DENIED)       echo absent ;;
+    *)            echo unknown ;;
+  esac
+}
+
+# rc 0 iff GITHUB_TOKEN may PUSH to $1: ghcr.io issues a pull,push registry token only
+# when the credential holds write on that package (or may create it). The credential
+# goes to curl on stdin (-K -), never in argv.
+ghcr_token_can_push() { # $1=PKG
+  [ -n "${GITHUB_TOKEN:-}" ] || return 1
+  _gcp_body=$(printf 'user = "%s:%s"\n' "${GITHUB_ACTOR:-x-access-token}" "$GITHUB_TOKEN" \
+    | curl -s -m 20 -K - "https://ghcr.io/token?scope=repository:${CGC_GHCR_OWNER:-diegonmarcos}/$1:pull,push" 2>/dev/null) || return 1
+  [ -n "$(printf '%s' "$_gcp_body" | jq -r '.token // empty' 2>/dev/null)" ]
+}
+
+# The fix for an existing package the caller's token cannot write. Printed, never run.
+ghcr_token_access_fix() { # $1=PKG
+  echo "::error::[cgc-db] $1: this run's GITHUB_TOKEN ($GITHUB_REPOSITORY) cannot write the existing package. One-time owner fix, no PAT: github.com/users/${CGC_GHCR_OWNER:-diegonmarcos}/packages/container/$1/settings → Manage Actions access → Add repository → $GITHUB_REPOSITORY, role Write. (Or delete the package: the next run recreates it private and linked to $GITHUB_REPOSITORY, at the cost of one full re-index.)"
+}
+
+caller_is_private() { # rc 0 iff the repo this GITHUB_TOKEN belongs to is private
+  [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private 2>/dev/null)" = "true" ]
+}
+
+gate_repo_push_token() { # $1=PKG → rc 0 = push allowed; exits the WHOLE SCRIPT otherwise
+  _gt_pkg="$1"
+  if ! caller_is_private; then
+    echo "::error::[cgc-db] $_gt_pkg: GITHUB_TOKEN push mode needs a PRIVATE caller (a package it creates inherits the caller's visibility) and $GITHUB_REPOSITORY is not provably private — refusing to push"
+    exit 1
+  fi
+  _gt_vis=$(ghcr_anon_visibility "$_gt_pkg")
+  case "$_gt_vis" in
+    absent)
+      echo "[cgc-db] $_gt_pkg: no package yet — pushing with $GITHUB_REPOSITORY's GITHUB_TOKEN, so GHCR creates it PRIVATE and linked to that private repo"
+      return 0 ;;
+    private)
+      if ghcr_token_can_push "$_gt_pkg"; then
+        echo "[cgc-db] $_gt_pkg: exists private and $GITHUB_REPOSITORY's GITHUB_TOKEN may write it — pushing (visibility is preserved across pushes)"
+        return 0
+      fi
+      ghcr_token_access_fix "$_gt_pkg"
+      exit 1 ;;
+    public)
+      echo "::error::[cgc-db] $_gt_pkg is PUBLICLY pullable but holds a private repo's index — refusing to push fresher private data into it. Delete it or make it private in the GitHub UI NOW (a GITHUB_TOKEN can do neither)"
+      exit 1 ;;
+    *)
+      echo "::error::[cgc-db] $_gt_pkg: ghcr.io did not answer the anonymous visibility probe — refusing to push blind"
+      exit 1 ;;
+  esac
+}
+
 gate_repo_push() { # $1=PKG $2=LOCAL_NAME → rc 0 = push allowed; exits the WHOLE SCRIPT otherwise
   _gp_pkg="$1"; _gp_local="$2"
+  if gh_token_push_mode && is_private_repo "$_gp_local"; then
+    gate_repo_push_token "$_gp_pkg"
+    return 0
+  fi
   resolve_repo_desired_visibility "$_gp_pkg" "$_gp_local"
   # `gh api ... || echo absent` does NOT work here, and that is not a nitpick: gh
   # prints the error BODY on stdout for a 404 and still exits non-zero, so the
@@ -416,6 +512,23 @@ gate_repo_push() { # $1=PKG $2=LOCAL_NAME → rc 0 = push allowed; exits the WHO
 
 verify_or_delete_repo_pkg() { # $1=PKG $2=LOCAL_NAME → rc 0 ok/skip; exits the WHOLE SCRIPT (not just this fn) on a caught leak
   _vd_pkg="$1"; _vd_local="$2"
+  if gh_token_push_mode && is_private_repo "$_vd_local"; then
+    # No delete here: a GITHUB_TOKEN cannot delete a package. Not needed either: the
+    # package was pushed by a private repo's token, so it is private unless the owner
+    # flipped it by hand. Check what anonymous can pull, and say so loudly if it can.
+    _vd_vis=$(ghcr_anon_visibility "$_vd_pkg")
+    case "$_vd_vis" in
+      private|absent)
+        echo "[cgc-db] $_vd_pkg: not anonymously pullable ($_vd_vis) — correct for a private repo's index"
+        return 0 ;;
+      public)
+        echo "::error::[cgc-db] $_vd_pkg is PUBLICLY pullable but holds a private repo's index. A GITHUB_TOKEN can neither delete it nor change its visibility: delete it or make it private in the GitHub UI NOW"
+        exit 1 ;;
+      *)
+        echo "::error::[cgc-db] $_vd_pkg: ghcr.io did not answer the anonymous visibility probe — could not confirm the package is private"
+        exit 1 ;;
+    esac
+  fi
   resolve_repo_desired_visibility "$_vd_pkg" "$_vd_local"
   if [ "$_rdv_desired" = "public" ]; then
     # The REVERSE drift (public repo, PRIVATE package) is not a leak but it
@@ -687,7 +800,7 @@ if [ -n "${PUSH_DOCKER_CONFIG:-}" ]; then
   DOCKER_CONFIG="$PUSH_DOCKER_CONFIG" push_with_retry "$IMAGE:$TAG" || exit $?
   rm -rf "$PUSH_DOCKER_CONFIG"; PUSH_DOCKER_CONFIG=""
 else
-  push_with_retry "$IMAGE:$TAG" || exit $?
+  push_with_retry "$IMAGE:$TAG" || { _pwr_rc=$?; [ "$MODE" = repo ] && gh_token_push_mode && is_private_repo "$LOCAL_NAME" && ghcr_token_access_fix "$PKG"; exit "$_pwr_rc"; }
 fi
 # Drop the local tagged copy after a successful push — GHCR is the single store, and
 # keeping it locally just re-fills the data-root every run. Next run rebuilds trivially.

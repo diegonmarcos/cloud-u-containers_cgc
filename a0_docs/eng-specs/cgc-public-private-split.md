@@ -49,9 +49,17 @@ repositories, so a restore started from another repo would race deploys for the 
 slot (the 2026-08-24 incident shape, run 32721840450) and add a second repo holding
 `WG_PRIVATE_KEY` + `OCI_SSH_KEY`. Restore logs carry only repo names, image names,
 counts and the mesh IP already published in cloud-u-containers' build.json (verified on
-job 113748705828), so keeping them in cloud-infra exposes nothing new. Both orchestrators
-end by **dispatching** `cloud-infra/cgc-db-restore.yml` with their surface and the cgc
-commit to run; cloud-infra validates that commit is on this repo's `main`.
+job 113748705828), so keeping them in cloud-infra exposes nothing new. The pub
+orchestrator ends by **dispatching** `cloud-infra/cgc-db-restore.yml` with its surface and
+the cgc commit to run; cloud-infra validates that commit is on this repo's `main`.
+
+The pvt side is **pulled**, not dispatched (#951, 2026-10-14): a dispatch from the private
+repo needs a hand-made cross-repo PAT. `cgc-db-restore.yml` has an hourly schedule whose
+`check` job compares the newest version of each private `cgc-db-<repo>` package (read with
+cloud-infra's existing `CGC_GHCR_PAT`) with the start of the last successful pvt restore
+(the run that uploaded the newest `cgc-db-pvt-restored` artifact) and runs the pvt restore
+with this repo's `main` when a package is newer. It stays inert while the legacy
+cloud-infra `cgc-db.yml` is enabled, and never starts while another restore run is live.
 
 ### Shared code: consumed by sha, not copied
 
@@ -252,21 +260,45 @@ renamed onto this layout. Source: cloud-infra `9676011e1`. 143 commits, authorsh
 | `CLOUD_INFRA_DISPATCH_TOKEN` | fine-grained PAT, repository `diegonmarcos/cloud-infra` only, Actions: read and write | dispatch `cgc-db-restore.yml surfaces=pub` |
 | variable `CGC_SCHEDULE_ENABLED` | repo variable, `true` at cutover | schedule switch |
 
-`cloud-me_cgc` (private):
+`cloud-me_cgc` (private) — no PAT since #951 (2026-10-14):
 
 | Secret | Scope | Why |
 |---|---|---|
-| `CGC_GHCR_PAT` | classic PAT: `write:packages`, `read:packages`, `delete:packages`, `repo` (the visibility probe reads private repos; packages link to `cloud-me_vault`) | push the 2 private packages |
-| `OPENROUTER_API_KEY` | as above | graphrag |
 | `CLOUD_DATA_DEPLOY_KEY` | read-only deploy key on `cloud-data` (the existing one can be reused) | clone |
 | `CLOUD_MY_AI_MEMORY_DEPLOY_KEY` | read-only deploy key on `cloud-data-my-ai-memory` | clone |
-| `CLOUD_INFRA_DISPATCH_TOKEN` | as above | dispatch `cgc-db-restore.yml surfaces=pvt` |
 | variable `CGC_SCHEDULE_ENABLED` | `true` at cutover | schedule switch |
+
+* **GHCR push**: the run's own `GITHUB_TOKEN` (`packages: write`). A package it creates is
+  linked to `cloud-me_cgc` and born private (a private repo's token cannot create a public
+  package, and no `GITHUB_TOKEN` can change visibility). The two packages that already
+  exist are linked to `cloud-me_vault`, so the token can write them only after a one-time
+  owner step per package: *Package settings → Manage Actions access → Add repository
+  `cloud-me_cgc`, role Write* (no API exists for it). Deleting a package instead also works:
+  the next run recreates it linked to `cloud-me_cgc`, with one full re-index. The index job
+  checks this before indexing and names the fix.
+* The delete-on-leak backstop is gone in this mode (a `GITHUB_TOKEN` cannot delete a
+  package). The pre- and post-push checks ask the registry anonymously instead (ghcr.io
+  hands an anonymous token only for a public package) and fail loudly if the package is
+  public, which only an owner's own UI action could cause.
+* **graphrag** without `OPENROUTER_API_KEY` uses build.json's keyless mesh relay
+  (my-ai-api, which holds the provider key itself), reachable from the oci-apps runner.
+* `CGC_GHCR_PAT` / `OPENROUTER_API_KEY`, if ever set here, are still honoured as overrides.
 
 `cloud-infra`: unchanged (`CGC_GHCR_PAT` for the box's GHCR login on the pvt restore,
 `WG_PRIVATE_KEY`, `OCI_SSH_KEY`, `vars.WG_HUB_PUBKEY`).
 
-## 9. Runners and billing (2026-10-10)
+## 9. Runners and billing (2026-10-10; #951 update 2026-10-14)
+
+**#951:** the pvt orchestrator now passes `runner: self-hosted` to `cgc-db-index.yml`, so
+its heavy per-repo `index` jobs run on its own repo-scoped oci-apps runner
+(`oci-apps-arm64-cgc`, to be added to cloud-u-containers `infra-bld_gha-runner`
+`gha.registrations`), one job at a time (`max-parallel: 1`). **Not registered yet**: the
+gate for adding it is 15 GB free on oci-apps, and the box had 11.4 GB, then 7.5 GB, on
+2026-10-14. Until it exists the pvt index jobs have no runner to start on. octocode has a pinned aarch64 build. The small
+jobs (guard, coalesce, repo matrix) stay hosted. The pub surface is forced onto
+`ubuntu-latest` whatever its caller passes, and the repo-matrix guard refuses a
+non-hosted `runner` from anything but a private pvt caller. The text below is the
+2026-10-10 state.
 
 Every job of the private repo uses GitHub-hosted `ubuntu-latest`; nothing in either surface
 runs on the oci-apps self-hosted runners (`oci-apps-arm64*`), and the private repo has no
