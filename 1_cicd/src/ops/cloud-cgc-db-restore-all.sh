@@ -1063,10 +1063,17 @@ if [ -n "$CONTAINER" ]; then
           echo "[cgc-db-restore-all] kg-store refresh skipped for $_c — no eligible repos"
           return 0
         fi
-        if docker exec -e OCTOCODE_REPOS="$_repos" -e OCTOCODE_SKIP_INDEX=1 "$_c" sh -c "$_cmd"; then
+        # Output is captured so a "[kg-ingest] ABORT" fails the run even when the baked-in
+        # reindex.sh (an older image) swallowed the exit code (#1061).
+        _kglog="$(mktemp)"
+        _kgrc=0
+        docker exec -e OCTOCODE_REPOS="$_repos" -e OCTOCODE_SKIP_INDEX=1 "$_c" sh -c "$_cmd" >"$_kglog" 2>&1 || _kgrc=$?
+        cat "$_kglog"
+        if [ "$_kgrc" = 0 ] && ! grep -q '\[kg-ingest\] ABORT' "$_kglog"; then
           echo "[cgc-db-restore-all] kg-store refresh OK ($_c)"
         else
-          echo "::warning::[cgc-db-restore-all] kg-store refresh failed for $_c (continuing — LanceDB restore already succeeded)"
+          echo "::error::[cgc-db-restore-all] kg-store refresh FAILED for $_c (a kg-ingest ABORT leaves stale rows; LanceDB restore itself succeeded) — run goes red"
+          RESTORE_KG_FAILED=1
         fi
       }
 
@@ -1113,6 +1120,10 @@ echo "[cgc-db-restore-all] RESTORE COMPLETE"
 # edges ingested, 0 failed, then rc=1). The disk exhaustion that used to
 # kill this step hid the bug; once there was room to finish, it surfaced.
 # An explicit if + explicit exit 0 — never rely on a trailing test's status.
+if [ "${RESTORE_KG_FAILED:-0}" = 1 ]; then
+  echo "::error::[cgc-db-restore-all] restore FAILED — kg-store refresh aborted (see [kg-ingest] ABORT above); re-run, the delete resumes where it stopped"
+  exit 1
+fi
 if [ "${RESTORE_MCP_FAILED:-0}" = 1 ]; then
   echo "::error::[cgc-db-restore-all] restore FAILED — MCP down and kg-store not refreshed (see recovery above)"
   exit 1
