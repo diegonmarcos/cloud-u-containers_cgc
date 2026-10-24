@@ -12,7 +12,8 @@ Each substitution must apply exactly the expected number of times; a pub edit th
 breaks one fails the render (and this repo's tester) instead of silently producing a
 pvt orchestrator that still says `surface: pub`.
 
-pvt differs from pub in three ways beyond names (#951):
+pvt differs from pub in these ways beyond names (#951):
+  * the hosted-runner jobs (schedule-off, guard, coalesce) run on `self-hosted` too;
   * every index call passes `runner: self-hosted` — the private repo's own repo-scoped
     oci-apps runner (hosted minutes of a private repo come out of the account budget);
   * the `restore` job (a cross-repo dispatch that needs a PAT) is CUT: cloud-infra's
@@ -50,6 +51,9 @@ def render(src: str, sha: str) -> str:
         ("Ask cloud-infra to restore the pub surface afterwards (default true).",
          "No effect on the pvt surface: cloud-infra's cgc-db-restore.yml pulls new private images itself (#951).", 1),
         ("uses: ./.github/workflows/cgc-db-index.yml", f"uses: {USES}@{sha}", 3),
+        # #951: hosted minutes of a private repo come out of the account budget, so the
+        # guard/coalesce/schedule-off jobs run on the same repo-scoped runner too.
+        ("    runs-on: ubuntu-latest\n", f"    runs-on: {PVT_RUNNER}\n", 3),
         ("      surface: pub\n", f"      surface: pvt\n      cgc_ref: {sha}\n      runner: {PVT_RUNNER}\n", 3),
         ("      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}\n",
          "      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}\n"

@@ -20,6 +20,8 @@ for ph in ("per-repo", "semantic", "graphrag"):
         if k not in s: bad.append(f"{ph}: secret {k} not passed")
     # #951: the private caller's index jobs run on its own self-hosted runner.
     if w.get("runner") != "self-hosted": bad.append(f"{ph}: runner {w.get('runner')}")
+for jn in ("schedule-off", "guard", "coalesce"):
+    if j[jn].get("runs-on") != "self-hosted": bad.append(f"{jn}: runs-on {j[jn].get('runs-on')}")
 # #951: no cross-repo dispatch (and so no PAT) in the private orchestrator; cloud-infra pulls.
 if "restore" in j: bad.append("pvt orchestrator still has a restore (dispatch) job")
 txt = open(sys.argv[1]).read()
