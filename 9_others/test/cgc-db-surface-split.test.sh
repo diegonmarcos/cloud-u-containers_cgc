@@ -107,7 +107,7 @@ ck "pvt from a public caller asking for one is refused" "$(guard pvt false self-
 ck "pvt from a PRIVATE caller may use its self-hosted runner" "$(guard pvt true self-hosted)" "pass"
 ck "index runs-on: pub always hosted, pvt the caller's choice" "$(cat "$T/runs_on")" "\${{ inputs.surface == 'pvt' && inputs.runner || 'ubuntu-latest' }}"
 ck "index matrix capped at 1 on a self-hosted runner" "$(cat "$T/max_par")" "\${{ (inputs.surface == 'pvt' && inputs.runner != '' && inputs.runner != 'ubuntu-latest') && 1 || 8 }}"
-ck "repo-matrix job stays hosted" "$(cat "$T/repos_runs_on")" "ubuntu-latest"
+ck "repo-matrix job follows the pvt runner (#951)" "$(cat "$T/repos_runs_on")" "\${{ inputs.surface == 'pvt' && inputs.runner || 'ubuntu-latest' }}"
 # Execute the matrix resolution (minus the network probe) against the fixture.
 mkdir -p "$T/ws/a_solutions/user-ai_cloud-cgc-pub-mcp"; cp "$BJ" "$T/ws/a_solutions/user-ai_cloud-cgc-pub-mcp/build.json"
 awk '/if \[ "\$CGC_SURFACE" = pub \]; then/{exit} {print}' "$T/resolve" | sed "s/'\${{ inputs.repos }}'/\"\$FILTER_IN\"/; s/\${{ inputs.phase }}/semantic/g" > "$T/resolve.sh"

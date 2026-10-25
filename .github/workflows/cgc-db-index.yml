@@ -98,7 +98,9 @@ jobs:
   # ── Guard + resolve the repo matrix (data-driven from cloud-u-containers' build.json) ──
   repos:
     name: "cgc-db · ${{ inputs.phase }} · ${{ inputs.surface }} · resolve repo matrix"
-    runs-on: ubuntu-latest
+    # pub: hosted. pvt: the private caller's own runner like `index` (#951); a hosted job of
+    # a private repo is blocked once the account budget is spent (run 40184553804).
+    runs-on: ${{ inputs.surface == 'pvt' && inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read
