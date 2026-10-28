@@ -297,7 +297,9 @@ if [ -z "${CGC_SANDBOXED:-}" ] && [ "${CGC_NO_SANDBOX:-}" != "1" ]; then
   # but there is no system manager → scope creation dies with "Host is down". There
   # the container's own cpus/memory limits already provide freeze-safety, so fall
   # back to nice/ionice.
-  if [ -d /run/systemd/system ] && command -v systemd-run >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  if [ -d /run/systemd/system ] && command -v systemd-run >/dev/null 2>&1 && sudo -n true 2>/dev/null \
+     && CGC_SUDO_E_PROBE=1 sudo -n -E sh -c '[ "${CGC_SUDO_E_PROBE:-}" = 1 ]' 2>/dev/null; then
+    # sudo-rs ignores -E and silently drops the env (CGC_PACKAGE_MODE & co.): fall back to nice/ionice.
     # --scope units have no ExecContext, so SupplementaryGroups= is rejected and
     # --uid/--gid drop the docker group → no daemon-socket access. Run with egid =
     # the docker socket's group (data-derived, not hardcoded) so the sandboxed
@@ -535,10 +537,17 @@ ensure_repos() {
       # sed redacts any token embedded in the reported remote URL.
       _gitc="git -c http.extraheader="
       _cerr="$CGC_SCRATCH/clone-err.$$"
-      if $_gitc clone -q --filter=blob:none --no-checkout "$url" "$d" 2>"$_cerr" \
-        && $_gitc -C "$d" checkout -q 2>>"$_cerr"; then
-        :
-      elif rm -rf "$d" 2>/dev/null; $_gitc clone -q "$url" "$d" 2>>"$_cerr"; then
+      _gitc="git -c http.extraheader= -c http.version=HTTP/1.1"
+      _cok=0
+      for _try in 1 2 3; do
+        : > "$_cerr"; rm -rf "$d" 2>/dev/null
+        if $_gitc clone -q --filter=blob:none --no-checkout "$url" "$d" 2>>"$_cerr" \
+          && $_gitc -C "$d" checkout -q 2>>"$_cerr"; then _cok=1; break
+        elif rm -rf "$d" 2>/dev/null; $_gitc clone -q "$url" "$d" 2>>"$_cerr"; then _cok=1; break
+        fi
+        [ "$_try" = 3 ] || { echo "[cgc-db] clone $lname attempt $_try failed - retrying in $((_try * 10))s"; sleep $((_try * 10)); }
+      done
+      if [ "$_cok" = 1 ]; then
         :
       else
         sed 's/x-access-token:[^@]*@/x-access-token:***@/g' "$_cerr" | tail -8 >&2
