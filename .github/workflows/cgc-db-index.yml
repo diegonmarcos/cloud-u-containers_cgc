@@ -72,10 +72,10 @@ on:
         description: "OPTIONAL. Direct OpenRouter key for the graphrag phase. Without it graphrag uses build.json's keyless mesh relay (my-ai-api), which only a runner on the fleet's private mesh (the oci-apps self-hosted runner) can reach."
         required: false
       CLOUD_DATA_DEPLOY_KEY:
-        description: "pvt only: read-only deploy key for diegonmarcos/cloud-data."
+        description: "pvt only: read-only deploy key for diegonmarcos/cloud-me-pvt-data (was cloud-data)."
         required: false
       CLOUD_MY_AI_MEMORY_DEPLOY_KEY:
-        description: "pvt only: read-only deploy key for diegonmarcos/cloud-data-my-ai-memory."
+        description: "pvt only: read-only deploy key for diegonmarcos/cloud-me-pvt-my-ai (was cloud-data-my-ai-memory)."
         required: false
 
 env:
@@ -248,7 +248,7 @@ jobs:
         run: |
           set -eu
           PREFIX=$(jq -r '.per_repo_publish.image_prefix' a_solutions/user-ai_cloud-cgc-pub-mcp/build.json)
-          PKG="${PREFIX##*/}${REPO}"
+          PKG="${PREFIX##*/}$(printf %s "$REPO" | tr A-Z a-z | sed -E 's/[._-]{2,}/-/g; s/^[._-]+//')"
           CGC_PKG_SOURCE_ONLY=1 . 1_cicd/src/ops/cloud-cgc-db-package.sh
           set +e
           VIS=$(ghcr_anon_visibility "$PKG")

@@ -218,7 +218,7 @@ resolve_repo_source_label() { # $1=PKG (for error msg) $2=LOCAL_NAME → stdout:
     return 0
   fi
   if is_private_repo "$2"; then
-    printf 'https://github.com/diegonmarcos/cloud-me_vault\n'
+    printf 'https://github.com/diegonmarcos/cloud-me-pvt-vault\n'
     return 0
   fi
   _rsl_remote=$(resolve_remote_name "$2") || {
@@ -712,7 +712,7 @@ PKG="${IMAGE##*/}"
 _dm=$(detect_mode "$PKG")
 case "$_dm" in
   base)   _mode=base ;;
-  repo:*) _mode=repo; LOCAL_NAME="${_dm#repo:}" ;;
+  repo:*) _mode=repo; LOCAL_NAME="${CGC_LOCAL_NAME:-${_dm#repo:}}" ;;
   *)      _mode=monolith ;;
 esac
 MODE="${CGC_PKG_MODE:-$_mode}"

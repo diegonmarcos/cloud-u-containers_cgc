@@ -147,6 +147,11 @@
 # ──────────────────────────────────────────────────────────────────────────
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# GHCR image-name component for a local repo name (repo names may carry upper case,
+# a leading "_" or "-_", which docker refuses). Lower-cases, collapses separator runs,
+# strips leading separators. Identity for every already-valid name.
+cgc_image_name() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/[._-]{2,}/-/g; s/^[._-]+//'; }
+
 
 # build.json is read LAZILY, only for whichever of TAG/IMAGE_PREFIX/BASE_IMAGE/
 # REPOS below the caller did NOT already supply via env. A deployed context
@@ -503,7 +508,7 @@ STAGED_REPOS=""
 PROJECT_OF=""
 SEEN_PROJECT_DIRS=" "
 for r in "$@"; do
-  img="${IMAGE_PREFIX}${r}:${TAG}"
+  img="${IMAGE_PREFIX}$(cgc_image_name "$r"):${TAG}"
   if ! docker manifest inspect "$img" >/dev/null 2>&1; then
     echo "::warning::[cgc-db-restore-all] $img not published yet — skipping $r (bootstrap tolerance)"
     MISSING="$MISSING $r"

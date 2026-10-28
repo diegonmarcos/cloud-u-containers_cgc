@@ -4,7 +4,7 @@ Status: phases 1-2 done (2026-10-09): both repos live, CI and leak scan green, p
 7fdcf5f, cloud-infra `cgc-db-restore.yml` live (dispatch-only). Phase 3 (first green run) waits on repository
 secrets (section 8); phases 4-5 follow the order in section 7.
 
-2026-10-10: the private repo was renamed `cloud-u-containers_cgc-pvt` -> **`cloud-me_cgc`**
+2026-10-10: the private repo was renamed `cloud-u-containers_cgc-pvt` -> **`cloud-me-pvt-cgc`**
 (owner: "private cgc must also run from our private cloud-me repo", section 1). Its runs are
 additionally blocked at ACCOUNT level: private repos have used the month's included Actions
 minutes and the Actions budget stops further use (section 9). Until both blockers clear, the
@@ -21,15 +21,15 @@ The cgc pipeline left cloud-infra and was split by **surface**:
 | Repo | Visibility | Holds | Indexes |
 |---|---|---|---|
 | `diegonmarcos/cloud-u-containers_cgc` (this repo) | public | all pipeline code (scripts, chunk planner, packaging, restore script, testers, specs), the reusable `cgc-db-index.yml`, the **pub** orchestrator `cgc-db.yml` | the 6 public repos |
-| `diegonmarcos/cloud-me_cgc` (was `cloud-u-containers_cgc-pvt`) | **private** | the **pvt** orchestrator only; calls this repo's `cgc-db-index.yml` pinned by sha | the 2 private repos |
+| `diegonmarcos/cloud-me-pvt-cgc` (was `cloud-u-containers_cgc-pvt`) | **private** | the **pvt** orchestrator only; calls this repo's `cgc-db-index.yml` pinned by sha | the 2 private repos |
 | `diegonmarcos/cloud-infra` | public | `cgc-db-restore.yml`: restore-all onto oci-apps for one surface per run (WireGuard + SSH + `ship-wg-runner` lock) | nothing |
 
 Naming: the code ran as part of the cloud-u-containers service `user-ai_cloud-cgc-pub-mcp`
 (its build.json is the pipeline's config), and split-outs are named `<parent>_<name>`
 (registry: `git-repos-master/repos.json`, group `a_cloud`). Private repos belong to the
-`cloud-me` family (`cloud-me` is its link-only master; `cloud-me_vault`, `cloud-me_configs`,
+`cloud-me` family (`cloud-me` is its link-only master; `cloud-me-pvt-vault`, `cloud-me_configs`,
 ...), while every `cloud-u-*` repo is public, so the private half is `cloud-me_<name>` =
-`cloud-me_cgc` (renamed 2026-10-10; GitHub redirects the old name).
+`cloud-me-pvt-cgc` (renamed 2026-10-10; GitHub redirects the old name).
 
 ### Why a separate private repo, not cloud-infra
 
@@ -96,11 +96,11 @@ Also noted: cloud-u-containers carries its own `user-ai_cloud-cgc-pub-mcp/src/cl
 
 | | **pub** | **pvt** |
 |---|---|---|
-| Orchestrator | `cloud-u-containers_cgc/.github/workflows/cgc-db.yml` | `cloud-me_cgc/.github/workflows/cgc-db.yml` |
+| Orchestrator | `cloud-u-containers_cgc/.github/workflows/cgc-db.yml` | `cloud-me-pvt-cgc/.github/workflows/cgc-db.yml` |
 | Logs | public | private |
 | Repos indexed | cloud-infra, cloud-infra-desktop, front (= diegonmarcos.github.io), front-data, cloud-u-containers, cloud-u-android | cloud-data, cloud-data-my-ai-memory |
 | Repo set source | `index_repos − private_repos` (build.json), each verified public via unauthenticated GitHub API at run time | `private_repos` |
-| GHCR images written | `ghcr.io/diegonmarcos/cgc-db-<repo>:latest` (+ `:latest-force-<phase>`) for the 6 public repos; public packages linked to their own repos | same names for the 2 private repos; private packages linked to `cloud-me_vault` |
+| GHCR images written | `ghcr.io/diegonmarcos/cgc-db-<repo>:latest` (+ `:latest-force-<phase>`) for the 6 public repos; public packages linked to their own repos | same names for the 2 private repos; private packages linked to `cloud-me-pvt-vault` |
 | GHCR images read at restore | base + the 6 public images | base + **all 8** images (pvt is the full store) |
 | Shared | `ghcr.io/diegonmarcos/cgc-db-base:0.22.0` (read by both, auto-seeded only if missing) | same |
 | Chunk/manifest state | inside each repo's own image (`.cgc-chunks-<phase>.json`, `.cgc-status-<phase>.json`, `.cgc-manifest-<phase>.json`) | same |
@@ -260,7 +260,7 @@ renamed onto this layout. Source: cloud-infra `9676011e1`. 143 commits, authorsh
 | `CLOUD_INFRA_DISPATCH_TOKEN` | fine-grained PAT, repository `diegonmarcos/cloud-infra` only, Actions: read and write | dispatch `cgc-db-restore.yml surfaces=pub` |
 | variable `CGC_SCHEDULE_ENABLED` | repo variable, `true` at cutover | schedule switch |
 
-`cloud-me_cgc` (private) — no PAT since #951 (2026-10-14):
+`cloud-me-pvt-cgc` (private) — no PAT since #951 (2026-10-14):
 
 | Secret | Scope | Why |
 |---|---|---|
@@ -269,12 +269,12 @@ renamed onto this layout. Source: cloud-infra `9676011e1`. 143 commits, authorsh
 | variable `CGC_SCHEDULE_ENABLED` | `true` at cutover | schedule switch |
 
 * **GHCR push**: the run's own `GITHUB_TOKEN` (`packages: write`). A package it creates is
-  linked to `cloud-me_cgc` and born private (a private repo's token cannot create a public
+  linked to `cloud-me-pvt-cgc` and born private (a private repo's token cannot create a public
   package, and no `GITHUB_TOKEN` can change visibility). The two packages that already
-  exist are linked to `cloud-me_vault`, so the token can write them only after a one-time
+  exist are linked to `cloud-me-pvt-vault`, so the token can write them only after a one-time
   owner step per package: *Package settings → Manage Actions access → Add repository
-  `cloud-me_cgc`, role Write* (no API exists for it). Deleting a package instead also works:
-  the next run recreates it linked to `cloud-me_cgc`, with one full re-index. The index job
+  `cloud-me-pvt-cgc`, role Write* (no API exists for it). Deleting a package instead also works:
+  the next run recreates it linked to `cloud-me-pvt-cgc`, with one full re-index. The index job
   checks this before indexing and names the fix.
 * The delete-on-leak backstop is gone in this mode (a `GITHUB_TOKEN` cannot delete a
   package). The pre- and post-push checks ask the registry anonymously instead (ghcr.io

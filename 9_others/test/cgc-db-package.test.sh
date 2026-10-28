@@ -307,7 +307,7 @@ gh() {
     *) echo "unexpected gh $*" >> "$CALL_LOG"; return 1 ;;
   esac
 }
-tm() { CGC_SURFACE=pvt GITHUB_REPOSITORY=diegonmarcos/cloud-me_cgc GITHUB_TOKEN=dummy CGC_GHCR_PAT= "$@"; }
+tm() { CGC_SURFACE=pvt GITHUB_REPOSITORY=diegonmarcos/cloud-me-pvt-cgc GITHUB_TOKEN=dummy CGC_GHCR_PAT= "$@"; }
 unset CGC_GHCR_PAT
 
 : > "$CALL_LOG"; STUB_CALLER_PRIVATE=true STUB_ANON=absent
@@ -340,10 +340,10 @@ out=$(tm gate_repo_push cgc-db-cloud-data cloud-data 2>&1); rc=$?
 { [ "$rc" -ne 0 ] && echo "$out" | grep -q "refusing to push blind"; } \
   && ok "token mode: registry probe unreadable -> refused (unknown is not absent)" || bad "case T6: rc=$rc out=[$out]"
 
-[ "$(tm resolve_repo_source_label cgc-db-cloud-data cloud-data)" = "https://github.com/diegonmarcos/cloud-me_cgc" ] \
+[ "$(tm resolve_repo_source_label cgc-db-cloud-data cloud-data)" = "https://github.com/diegonmarcos/cloud-me-pvt-cgc" ] \
   && ok "token mode: private repo's LABEL names the caller" || bad "case T7: label $(tm resolve_repo_source_label cgc-db-cloud-data cloud-data)"
-[ "$(CGC_SURFACE=pvt CGC_GHCR_PAT=x resolve_repo_source_label cgc-db-cloud-data cloud-data)" = "https://github.com/diegonmarcos/cloud-me_vault" ] \
-  && ok "PAT mode: private repo's LABEL unchanged (cloud-me_vault)" || bad "case T8"
+[ "$(CGC_SURFACE=pvt CGC_GHCR_PAT=x resolve_repo_source_label cgc-db-cloud-data cloud-data)" = "https://github.com/diegonmarcos/cloud-me-pvt-vault" ] \
+  && ok "PAT mode: private repo's LABEL unchanged (cloud-me-pvt-vault)" || bad "case T8"
 
 for v in private absent; do
   : > "$CALL_LOG"; STUB_ANON=$v

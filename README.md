@@ -8,7 +8,7 @@ server. Split out of cloud-infra and cloud-u-containers (split-outs are named
 
 * `.github/workflows/cgc-db.yml`: pub orchestrator (semantic, then graphrag), twice daily.
 * `.github/workflows/cgc-db-index.yml`: reusable index phase, one matrix job per repo.
-  Also called, pinned by sha, by the private orchestrator in `cloud-me_cgc`
+  Also called, pinned by sha, by the private orchestrator in `cloud-me-pvt-cgc`
   (private, cloud-me family; was `cloud-u-containers_cgc-pvt`).
 * `1_cicd/src/ops/`: index, chunk planner, packaging, pull and restore scripts.
 * `9_others/test/`: testers (`sh 9_others/test/run-all.sh`, needs

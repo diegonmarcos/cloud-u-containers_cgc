@@ -36,6 +36,11 @@ set -eu
 # on every run). CGC_START_TS lets a caller anchor it even earlier.
 START_TS="${CGC_START_TS:-$(date +%s)}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# GHCR image-name component for a local repo name (repo names may carry upper case,
+# a leading "_" or "-_", which docker refuses). Lower-cases, collapses separator runs,
+# strips leading separators. Identity for every already-valid name.
+cgc_image_name() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/[._-]{2,}/-/g; s/^[._-]+//'; }
+
 # #888: the phase must be known before the first use of it. resume_force_partial
 # runs in the per-repo restore loop, long before the manifest block below; with
 # MANIFEST_PHASE still empty there it asked GHCR for <repo>:latest-force-default
@@ -994,7 +999,7 @@ checkpoint_publish() {  # $1 = repo local name
       echo "::error::[cgc-db] a manifest naming an absent fragment is unreadable forever; the prior image on GHCR is the better artifact and is left in place."
       return 1
     fi
-    CGC_BUILD_JSON="$BJ" CGC_PROJECT_DIR="${_proj_resolved:-}" sh "$HERE/cloud-cgc-db-package.sh" "$OCTO_HOME" "${REPO_PREFIX}${1}" "$REPO_TAG"
+    CGC_BUILD_JSON="$BJ" CGC_PROJECT_DIR="${_proj_resolved:-}" CGC_LOCAL_NAME="$1" sh "$HERE/cloud-cgc-db-package.sh" "$OCTO_HOME" "${REPO_PREFIX}$(cgc_image_name "$1")" "$REPO_TAG"
   else
     CGC_BUILD_JSON="$BJ" sh "$HERE/cloud-cgc-db-package.sh" "$OCTO_HOME" "$IMAGE" "$TAG"
   fi
@@ -1022,7 +1027,7 @@ force_partial_tag() { printf '%s-force-%s' "$REPO_TAG" "${MANIFEST_PHASE:-defaul
 
 resume_force_partial() {  # $1 = repo local name → layers the resumable partial into OCTO_HOME, or nothing
   _rfp_before=$(project_dirs_snapshot "$OCTO_HOME")
-  CGC_PULL_MERGE=1 sh "$HERE/cloud-cgc-db-pull.sh" "$OCTO_HOME" "${REPO_PREFIX}${1}:$(force_partial_tag)" || true
+  CGC_PULL_MERGE=1 sh "$HERE/cloud-cgc-db-pull.sh" "$OCTO_HOME" "${REPO_PREFIX}$(cgc_image_name "$1"):$(force_partial_tag)" || true
   for _rfp_d in $(project_dirs_snapshot "$OCTO_HOME"); do
     printf '%s\n' "$_rfp_before" | grep -qxF "$_rfp_d" && continue
     _rfp_m="$OCTO_HOME/$_rfp_d/$FORCE_PARTIAL_MARKER"
@@ -1261,7 +1266,7 @@ if [ "${CGC_PACKAGE_MODE:-monolith}" = "per-repo" ]; then
       resume_force_partial "$_r"
       continue
     fi
-    CGC_PULL_MERGE=1 sh "$HERE/cloud-cgc-db-pull.sh" "$OCTO_HOME" "${REPO_PREFIX}${_r}:${REPO_TAG}" || true
+    CGC_PULL_MERGE=1 sh "$HERE/cloud-cgc-db-pull.sh" "$OCTO_HOME" "${REPO_PREFIX}$(cgc_image_name "$_r"):${REPO_TAG}" || true
   done
   # SELF-HEAL a torn checkpoint. Dropping only the broken TABLE would not work and
   # would be worse than not trying: file_metadata.lance (content hash) and
