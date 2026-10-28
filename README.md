@@ -12,7 +12,7 @@ server. Split out of cloud-infra and cloud-u-containers (split-outs are named
   (private, cloud-me family; was `cloud-u-containers_cgc-pvt`).
 * `1_cicd/src/ops/`: index, chunk planner, packaging, pull and restore scripts.
 * `9_others/test/`: testers (`sh 9_others/test/run-all.sh`, needs
-  `diegonmarcos/cloud-u-containers` checked out at `a_solutions/`).
+  `diegonmarcos/cloudy-u-containers` checked out at `a_solutions/`).
 * `a0_docs/eng-specs/`: `cgc-public-private-split.md` (how the surfaces are split, the
   safety audit, cutover) and `cgc-incremental-chunked.md` (how indexing works).
 

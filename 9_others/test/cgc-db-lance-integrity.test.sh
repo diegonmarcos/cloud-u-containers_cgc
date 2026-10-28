@@ -422,7 +422,7 @@ fi
 #       1_cicd/src/ops/cloud-cgc-db-restore-all.sh                  (CI -> box)
 #       1_cicd/dist/scripts/cloud-cgc-db-restore-all.sh             (generated)
 #       a_solutions/user-ai_cloud-cgc-pub-mcp/src/cloud-cgc-db-restore-all.sh
-#     The third is a DIFFERENT repository (diegonmarcos/cloud-u-containers) and is
+#     The third is a DIFFERENT repository (diegonmarcos/cloudy-u-containers) and is
 #     read at Nix eval time by that service's compose.nix (builtins.readFile) into
 #     the db-restore-multi profile, so it is a real execution path, not a stale
 #     copy. When the swap fix landed in 1_cicd on 2026-09-16 that copy still had
@@ -441,7 +441,7 @@ if [ ! -d "$REPO_ROOT/a_solutions" ]; then
   # Neither pass nor fail: this checkout simply does not have the other repo, and
   # counting it as a pass would be the "guard that tests nothing" this file exists
   # to prevent. lint-pipeline.yml always checks it out (actions/checkout with
-  # repository: diegonmarcos/cloud-u-containers, path: a_solutions), so the gate is
+  # repository: diegonmarcos/cloudy-u-containers, path: a_solutions), so the gate is
   # real where it gates.
   echo "  SKIPPED (not counted): a_solutions/ is not checked out here, so the compose copy of restore-all could not be compared. CI always checks it out."
 elif [ ! -f "$RA3" ]; then

@@ -161,7 +161,7 @@ for _r in $(jq -r '(.runtime.octocode.repo_map // {}) | keys[]?' "$BJ"); do
   done
 done
 # SURFACE SPLIT. The pipeline runs from two repositories:
-#   CGC_SURFACE=pub  diegonmarcos/cloud-u-containers_cgc (PUBLIC; its Actions logs are
+#   CGC_SURFACE=pub  diegonmarcos/cloudy-u-containers_cgc (PUBLIC; its Actions logs are
 #                    public). Private repos are outside its universe entirely: dropped
 #                    from the default list, never cloned, and refused when named.
 #   CGC_SURFACE=pvt  diegonmarcos/cloud-me_cgc (PRIVATE). Any index repo.

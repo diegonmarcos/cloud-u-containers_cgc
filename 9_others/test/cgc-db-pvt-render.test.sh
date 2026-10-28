@@ -15,7 +15,7 @@ for ph in ("per-repo", "semantic", "graphrag"):
     w = j[ph]["with"]; s = j[ph]["secrets"]
     if w.get("surface") != "pvt": bad.append(f"{ph}: surface {w.get('surface')}")
     if w.get("cgc_ref") != sha: bad.append(f"{ph}: cgc_ref {w.get('cgc_ref')}")
-    if j[ph]["uses"] != f"diegonmarcos/cloud-u-containers_cgc/.github/workflows/cgc-db-index.yml@{sha}": bad.append(f"{ph}: uses {j[ph]['uses']}")
+    if j[ph]["uses"] != f"diegonmarcos/cloudy-u-containers_cgc/.github/workflows/cgc-db-index.yml@{sha}": bad.append(f"{ph}: uses {j[ph]['uses']}")
     for k in ("CLOUD_DATA_DEPLOY_KEY", "CLOUD_MY_AI_MEMORY_DEPLOY_KEY"):
         if k not in s: bad.append(f"{ph}: secret {k} not passed")
     # #951: the private caller's index jobs run on its own self-hosted runner.

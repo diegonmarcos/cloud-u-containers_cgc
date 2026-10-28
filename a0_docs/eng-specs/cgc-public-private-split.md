@@ -20,7 +20,7 @@ The cgc pipeline left cloud-infra and was split by **surface**:
 
 | Repo | Visibility | Holds | Indexes |
 |---|---|---|---|
-| `diegonmarcos/cloud-u-containers_cgc` (this repo) | public | all pipeline code (scripts, chunk planner, packaging, restore script, testers, specs), the reusable `cgc-db-index.yml`, the **pub** orchestrator `cgc-db.yml` | the 6 public repos |
+| `diegonmarcos/cloudy-u-containers_cgc` (this repo) | public | all pipeline code (scripts, chunk planner, packaging, restore script, testers, specs), the reusable `cgc-db-index.yml`, the **pub** orchestrator `cgc-db.yml` | the 6 public repos |
 | `diegonmarcos/cloud-me-pvt-cgc` (was `cloud-u-containers_cgc-pvt`) | **private** | the **pvt** orchestrator only; calls this repo's `cgc-db-index.yml` pinned by sha | the 2 private repos |
 | `diegonmarcos/cloud-infra` | public | `cgc-db-restore.yml`: restore-all onto oci-apps for one surface per run (WireGuard + SSH + `ship-wg-runner` lock) | nothing |
 

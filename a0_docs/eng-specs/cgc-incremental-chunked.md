@@ -3,7 +3,7 @@
 Status: implemented (`1_cicd/src/ops/cloud-cgc-db-chunk.sh`, wired into
 `cloud-cgc-db-update.sh`). Test: `9_others/test/cgc-db-chunk-plan.test.sh`.
 Moved from cloud-infra with the pipeline (2026-10-09); paths are relative to
-`diegonmarcos/cloud-u-containers_cgc`. Restore-all now runs from cloud-infra's
+`diegonmarcos/cloudy-u-containers_cgc`. Restore-all now runs from cloud-infra's
 `cgc-db-restore.yml`, one surface per run: see `cgc-public-private-split.md`.
 
 ## 0. What was actually wrong (measured, not inferred)

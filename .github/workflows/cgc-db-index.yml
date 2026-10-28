@@ -55,7 +55,7 @@ on:
         default: "false"
         type: string
       cgc_ref:
-        description: "Commit of diegonmarcos/cloud-u-containers_cgc whose scripts run. A cross-repo caller MUST pass the same 40-hex sha it pins in `uses:`. Empty = this repo's own run sha (only valid when the caller IS this repo)."
+        description: "Commit of diegonmarcos/cloudy-u-containers_cgc whose scripts run. A cross-repo caller MUST pass the same 40-hex sha it pins in `uses:`. Empty = this repo's own run sha (only valid when the caller IS this repo)."
         required: false
         default: ""
         type: string
@@ -79,7 +79,7 @@ on:
         required: false
 
 env:
-  CGC_REPO: diegonmarcos/cloud-u-containers_cgc
+  CGC_REPO: diegonmarcos/cloudy-u-containers_cgc
   # GHCR push credential. cloud-cgc-db-update.sh reads GHCR_TOKEN for the login that pushes
   # every per-repo package; a package is linked to its SOURCE repo (org.opencontainers.image.
   # source), so the caller's GITHUB_TOKEN cannot write it. Falls back to GITHUB_TOKEN, which
@@ -150,7 +150,7 @@ jobs:
           echo "[cgc-db] index job runner: $CGC_RUNNER"
       - uses: actions/checkout@v4
         with:
-          repository: diegonmarcos/cloud-u-containers
+          repository: diegonmarcos/cloudy-u-containers
           path: a_solutions
       - name: Resolve the surface's repos → matrix JSON
         id: repos
@@ -232,11 +232,11 @@ jobs:
           [ "$FREE" -ge "$CGC_MIN_FREE_GB" ] || { echo "::error::only ${FREE}G free on the self-hosted runner's disk (need ${CGC_MIN_FREE_GB}G) — refusing to index onto a full box"; exit 1; }
       - uses: actions/checkout@v4
         with:
-          repository: diegonmarcos/cloud-u-containers_cgc
+          repository: diegonmarcos/cloudy-u-containers_cgc
           ref: ${{ needs.repos.outputs.ref }}
       - uses: actions/checkout@v4
         with:
-          repository: diegonmarcos/cloud-u-containers
+          repository: diegonmarcos/cloudy-u-containers
           path: a_solutions
       # pvt without CGC_GHCR_PAT pushes with this run's GITHUB_TOKEN (#951). An EXISTING
       # package the token cannot write would only fail at publish time, after hours of

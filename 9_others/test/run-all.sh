@@ -5,7 +5,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 [ -f "$ROOT/a_solutions/user-ai_cloud-cgc-pub-mcp/build.json" ] \
-  || { echo "::error::a_solutions/user-ai_cloud-cgc-pub-mcp/build.json missing — check out diegonmarcos/cloud-u-containers at a_solutions/"; exit 1; }
+  || { echo "::error::a_solutions/user-ai_cloud-cgc-pub-mcp/build.json missing — check out diegonmarcos/cloudy-u-containers at a_solutions/"; exit 1; }
 failed=""
 for t in "$ROOT"/9_others/test/*.test.sh; do
   n=$(basename "$t")

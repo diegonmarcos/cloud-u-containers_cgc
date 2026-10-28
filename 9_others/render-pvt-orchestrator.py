@@ -26,7 +26,7 @@ pvt differs from pub in these ways beyond names (#951):
 import re
 import sys
 
-USES = "diegonmarcos/cloud-u-containers_cgc/.github/workflows/cgc-db-index.yml"
+USES = "diegonmarcos/cloudy-u-containers_cgc/.github/workflows/cgc-db-index.yml"
 PVT_RUNNER = "self-hosted"
 # The pub restore job starts at this comment and runs to the end of the file.
 RESTORE_START = "  # Propagation onto oci-apps needs the WireGuard mesh and SSH."
