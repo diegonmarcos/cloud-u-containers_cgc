@@ -105,7 +105,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          URL="https://api.github.com/repos/diegonmarcos/cloud-t-infra/actions/workflows/cgc-db.yml/runs?per_page=50"
+          URL="https://api.github.com/repos/diegonmarcos/cloudy-t-infra/actions/workflows/cgc-db.yml/runs?per_page=50"
           for i in 1 2 3 4; do
             code=$(curl -s -o legacy.json -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" "$URL")
             case "$code" in 403|429) echo "[cgc-db] legacy run state: HTTP $code (attempt $i/4), retrying in 30s"; sleep 30 ;; *) break ;; esac
@@ -252,6 +252,6 @@ jobs:
         run: |
           set -eu
           [ -n "$GH_TOKEN" ] || { echo "::error::CLOUD_INFRA_DISPATCH_TOKEN is not set in this repo — the index published to GHCR but oci-apps was NOT refreshed. Set the secret, or run cloud-infra's cgc-db-restore.yml by hand with surfaces=pub cgc_ref=${{ github.sha }}"; exit 1; }
-          gh workflow run cgc-db-restore.yml -R diegonmarcos/cloud-t-infra \
+          gh workflow run cgc-db-restore.yml -R diegonmarcos/cloudy-t-infra \
             -f surfaces=pub -f cgc_ref="${{ github.sha }}" -f source="$SOURCE"
           echo "[cgc-db] dispatched cloud-infra cgc-db-restore.yml surfaces=pub cgc_ref=${{ github.sha }} (source $SOURCE)"
