@@ -1,0 +1,62 @@
+{
+  "schema": "readme-node/v1",
+  "generated_by": "_git-repos-master readme-render.js nodeData() from projects-repos.json; DO NOT EDIT (node repos-sot.js sync-readmes)",
+  "name": "cloudy-u-containers_cgc",
+  "label": "cloudy-u-containers_cgc",
+  "code": "1.1.2.3",
+  "kind": "repo",
+  "description": "Public half of the cgc code knowledge graph pipeline: octocode indexes of the public repos -> GHCR -> cloud-cgc-pub-mcp. Split out of cloud-u-containers / cloud-infra.",
+  "visibility": "public",
+  "url": "https://github.com/diegonmarcos/cloudy-u-containers_cgc",
+  "developer": "Leaf.y",
+  "farm": "1.1.Cloudy",
+  "breadcrumb": [
+    {
+      "code": "1",
+      "kind": "area",
+      "label": "Unix",
+      "icon": "🐧"
+    },
+    {
+      "code": "1.1",
+      "kind": "project",
+      "label": "Cloudy",
+      "icon": "☁️"
+    },
+    {
+      "code": "1.1.2",
+      "kind": "family",
+      "label": "C3",
+      "icon": ""
+    }
+  ],
+  "hub": {
+    "name": "cloudy-___",
+    "code": "1.1.0",
+    "url": "https://github.com/diegonmarcos/cloudy-___"
+  },
+  "base_dir": "git",
+  "members": [],
+  "tree": [
+    "├── .claude/",
+    "│   ├── agents/",
+    "│   ├── hooks/",
+    "│   │   └── c3/",
+    "│   └── skills/",
+    "│       └── c3-infra/",
+    "├── .githooks/",
+    "├── .github/",
+    "│   └── workflows/",
+    "├── .obsidian/",
+    "├── .vscode/",
+    "├── 0_hub/",
+    "│   └── cloudy-___ (submodule)",
+    "├── 1_cicd/",
+    "│   └── src/",
+    "│       └── ops/",
+    "├── 9_others/",
+    "│   └── test/",
+    "└── a0_docs/",
+    "    └── eng-specs/"
+  ]
+}
