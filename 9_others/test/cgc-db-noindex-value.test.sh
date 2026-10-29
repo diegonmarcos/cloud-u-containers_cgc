@@ -80,9 +80,9 @@ while IFS= read -r p; do
   mkdir -p "$R/$(dirname "$p")"; echo x > "$R/$p"
 done < "$T/keep"
 
-# The .noindex cloud-cgc-db-update.sh writes for cloud-u-android: base + per-repo extra.
+# The .noindex cloud-cgc-db-update.sh writes for cloudy-u-android: base + per-repo extra.
 { jq -r '.runtime.octocode.noindex_patterns // [] | .[]' "$BJ"
-  jq -r '((.runtime.octocode.noindex_extra // {})["cloud-u-android"] // []) | .[]' "$BJ"; } > "$R/.noindex"
+  jq -r '((.runtime.octocode.noindex_extra // {})["cloudy-u-android"] // []) | .[]' "$BJ"; } > "$R/.noindex"
 git -C "$R" add -A && git -C "$R" commit -qm fixture
 
 # shellcheck disable=SC1090
