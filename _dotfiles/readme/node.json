@@ -5,6 +5,7 @@
   "label": "cloudy-u-containers_cgc",
   "code": "1.1.2.3",
   "kind": "repo",
+  "variant": "repo",
   "description": "Public half of the cgc code knowledge graph pipeline: octocode indexes of the public repos -> GHCR -> cloud-cgc-pub-mcp. Split out of cloud-u-containers / cloud-infra.",
   "visibility": "public",
   "url": "https://github.com/diegonmarcos/cloudy-u-containers_cgc",
