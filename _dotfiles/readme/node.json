@@ -1,9 +1,9 @@
 {
   "schema": "readme-node/v1",
-  "generated_by": "_git-repos-master readme-render.js nodeData() from projects-repos.json; DO NOT EDIT (node repos-sot.js sync-readmes)",
+  "generated_by": "_git-repos-master 0_registry/readme-render.js nodeData() from projects-repos.json; DO NOT EDIT (node 0_registry/repos-sot.js sync-readmes)",
   "name": "cloudy-u-containers_cgc",
   "label": "cloudy-u-containers_cgc",
-  "code": "1.1.2.3",
+  "code": "1.1.3.1.2",
   "kind": "repo",
   "variant": "repo",
   "description": "Public half of the cgc code knowledge graph pipeline: octocode indexes of the public repos -> GHCR -> cloud-cgc-pub-mcp. Split out of cloud-u-containers / cloud-infra.",
@@ -25,9 +25,15 @@
       "icon": "☁️"
     },
     {
-      "code": "1.1.2",
+      "code": "1.1.3",
       "kind": "family",
-      "label": "C3",
+      "label": "Linux",
+      "icon": ""
+    },
+    {
+      "code": "1.1.3.1",
+      "kind": "family",
+      "label": "Linux Containers",
       "icon": ""
     }
   ],

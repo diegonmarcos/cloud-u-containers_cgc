@@ -26,7 +26,7 @@ The cgc pipeline left cloud-infra and was split by **surface**:
 
 Naming: the code ran as part of the cloud-u-containers service `user-ai_cloud-cgc-pub-mcp`
 (its build.json is the pipeline's config), and split-outs are named `<parent>_<name>`
-(registry: `git-repos-master/repos.json`, group `a_cloud`). Private repos belong to the
+(registry: `git-repos-master/0_registry/repos.json`, group `a_cloud`). Private repos belong to the
 `cloud-me` family (`cloud-me` is its link-only master; `cloud-me-pvt-vault`, `cloud-me_configs`,
 ...), while every `cloud-u-*` repo is public, so the private half is `cloud-me_<name>` =
 `cloud-me-pvt-cgc` (renamed 2026-10-10; GitHub redirects the old name).
@@ -156,7 +156,7 @@ Progress carries over unchanged: same image names, same tags, same in-image stat
 
 1. Design + audit: this document.
 2. Repos created, code pushed (history kept, section 6.3), registered in
-   `git-repos-master/repos.json`, cloud-master `repos.json` and cloud-infra's fleet
+   `git-repos-master/0_registry/repos.json`, cloud-master `repos.json` and cloud-infra's fleet
    manifest (`0_apps/src/manifest.json` → Claude settings, dotfiles, leak-scan gate).
    cloud-infra gains `cgc-db-restore.yml` (dispatch-only; inert until called).
 3. Green once: dispatch the pub orchestrator (`phase=semantic repos=front-data restore=false`
